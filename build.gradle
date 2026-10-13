@@ -1,0 +1,64 @@
+plugins {
+    id 'java'
+    id 'org.jetbrains.intellij.platform' version '2.19.0'
+}
+
+group = 'com.fsodomka.structurediff'
+version = '2026.2-1.0'
+
+repositories {
+    mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+    options.compilerArgs.add("-Xlint:deprecation")
+}
+
+def platformLocalPath = providers.gradleProperty('platformLocalPath').filter { !it.isBlank() }
+
+dependencies {
+    intellijPlatform {
+        if (platformLocalPath.isPresent()) {
+            local(platformLocalPath)
+        }
+        else {
+            intellijIdea(providers.gradleProperty('platformVersion'))
+        }
+    }
+}
+
+intellijPlatform {
+    buildSearchableOptions = false
+    instrumentCode = false
+    pluginConfiguration {
+        version = project.version.toString()
+        ideaVersion {
+            sinceBuild = '262'
+            untilBuild = provider { null }
+        }
+    }
+    pluginVerification {
+        ides {
+            if (platformLocalPath.isPresent()) {
+                local(platformLocalPath)
+            }
+            else {
+                create('IU', providers.gradleProperty('platformVersion').get())
+            }
+        }
+    }
+}
+
+tasks.named('runIde') {
+    maxHeapSize = '4g'
+}
