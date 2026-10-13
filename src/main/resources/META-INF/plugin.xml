@@ -1,0 +1,54 @@
+<idea-plugin>
+    <id>com.fsodomka.structurediff</id>
+    <name>Structure Diff</name>
+    <vendor>Frantisek Sodomka</vendor>
+
+    <description><![CDATA[
+    <p>Shows uncommitted changes at member level: added, modified and removed classes, methods and fields
+    of each changed file, in a tree like the Structure tool window.</p>
+    <p>Language-agnostic: works for every language with a Structure view (Java, TypeScript, JavaScript, Kotlin, ...).
+    The tree refreshes automatically when the VCS change list updates.</p>
+
+    <h3>Toolbar</h3>
+    <ul>
+      <li><b>Refresh</b> &ndash; recompute the tree now.</li>
+      <li><b>Show Nested Changes</b> &ndash; show changes inside functions, components and object literals,
+        not only inside classes.</li>
+      <li><b>Show Unversioned Files</b> &ndash; include new files not yet added to VCS.</li>
+      <li><b>Flash Changes</b> &ndash; briefly highlight members and files that appeared, changed status or
+        disappeared; removed nodes stay visible, struck out, until the highlight fades.</li>
+    </ul>
+
+    <h3>Tree</h3>
+    <ul>
+      <li>A summary line below the toolbar shows the number of changed files, added (<b>+</b>), modified (<b>~</b>)
+        and removed (<b>&minus;</b>) members, and the total number of changed lines.</li>
+      <li><b>File nodes</b> show the file name in its VCS status color, the same member counts
+        (+ added, ~ modified, &minus; removed) and changed line count, and the directory.
+        A renamed or moved file shows its old name or path after <b>&larr;</b>.
+        The tooltip lists lines added and removed and where the file was moved or renamed from.</li>
+      <li><b>Member nodes</b> show the member in its status color; removed members are struck out.
+        The tooltip shows the old and new signature when it changed, and the lines added and removed.</li>
+      <li>An added or removed member with children counts once; a modified container counts only through its
+        changed children.</li>
+      <li>When changes span several VCS roots, files are grouped by root.</li>
+    </ul>
+
+    <h3>Navigation</h3>
+    <ul>
+      <li><b>Double-click</b> or <b>Enter</b> &ndash; jump to the member in the source.</li>
+      <li><b>Middle-click</b> &ndash; open the diff scrolled to that member.</li>
+      <li>Context menu: <b>Show Diff</b>, <b>Jump to Source</b> and <b>Copy Path</b>, with the IDE's shortcuts
+        for Show Diff and Jump to Source.</li>
+    </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
+    <depends>com.intellij.modules.vcs</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Structure Diff" anchor="left" secondary="true" icon="AllIcons.Actions.Diff"
+                    factoryClass="com.fsodomka.structurediff.StructureDiffToolWindowFactory"/>
+    </extensions>
+</idea-plugin>
