@@ -1,10 +1,12 @@
+import org.jetbrains.intellij.platform.gradle.tasks.RunIdeTask
+
 plugins {
     id 'java'
     id 'org.jetbrains.intellij.platform' version '2.19.0'
 }
 
 group = 'com.fsodomka.structurediff'
-version = '2026.2-1.0'
+version = '2026.3.0'
 
 repositories {
     mavenCentral()
@@ -28,37 +30,34 @@ def platformLocalPath = providers.gradleProperty('platformLocalPath').filter { !
 
 dependencies {
     intellijPlatform {
-        if (platformLocalPath.isPresent()) {
-            local(platformLocalPath)
-        }
-        else {
-            intellijIdea(providers.gradleProperty('platformVersion'))
-        }
+        intellijIdea(providers.gradleProperty('platformVersion'))
     }
 }
 
 intellijPlatform {
     buildSearchableOptions = false
     instrumentCode = false
-    pluginConfiguration {
-        version = project.version.toString()
-        ideaVersion {
-            sinceBuild = '262'
-            untilBuild = provider { null }
-        }
-    }
-    pluginVerification {
-        ides {
-            if (platformLocalPath.isPresent()) {
-                local(platformLocalPath)
-            }
-            else {
-                create('IU', providers.gradleProperty('platformVersion').get())
-            }
-        }
+    pluginConfiguration.version = project.version.toString()
+    pluginConfiguration.ideaVersion.sinceBuild = '242'
+    pluginConfiguration.ideaVersion.untilBuild = provider { null }
+
+    // Verify against the oldest supported version (compile target), plus the local IDE when set
+    pluginVerification.ides.create('IU', providers.gradleProperty('platformVersion'))
+    if (platformLocalPath.isPresent()) {
+        pluginVerification.ides.local(platformLocalPath)
     }
 }
 
-tasks.named('runIde') {
+tasks.withType(RunIdeTask).configureEach {
     maxHeapSize = '4g'
+}
+
+if (platformLocalPath.isPresent()) {
+    intellijPlatformTesting {
+        runIde {
+            register('runIdeLocal') {
+                localPath = file(platformLocalPath.get())
+            }
+        }
+    }
 }
