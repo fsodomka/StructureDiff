@@ -11,8 +11,9 @@ import org.jetbrains.annotations.NotNull;
 public final class StructureDiffToolWindowFactory implements ToolWindowFactory, DumbAware {
 	@Override
 	public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
-		StructureDiffPanel panel = new StructureDiffPanel(project);
-		Content content = ContentFactory.getInstance().createContent(panel, null, false);
+		Content content = ContentFactory.getInstance().createContent(null, null, false);
+		StructureDiffContent panel = new StructureDiffContent(project, content);
+		content.setComponent(panel);
 		content.setDisposer(panel);
 		toolWindow.getContentManager().addContent(content);
 	}
