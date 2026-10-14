@@ -14,7 +14,8 @@
       <li><b>Refresh</b> &ndash; recompute the tree now.</li>
       <li><b>Show Nested Changes</b> &ndash; show changes inside functions, components and object literals,
         not only inside classes.</li>
-      <li><b>Show Unversioned Files</b> &ndash; include new files not yet added to VCS.</li>
+      <li><b>Show Unversioned Files</b> &ndash; include new files not yet added to VCS. Unversioned files directly in
+        a content root (usually the repository root) are skipped.</li>
       <li><b>Flash Changes</b> &ndash; briefly highlight members and files that appeared, changed status or
         disappeared; removed nodes stay visible, struck out, until the highlight fades.</li>
     </ul>
