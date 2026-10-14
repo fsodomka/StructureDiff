@@ -778,9 +778,11 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			new OpenFileDescriptor(project, workingFile).navigate(true);
 			return true;
 		}
-		Document document = FileDocumentManager.getInstance().getDocument(workingFile);
 		boolean current = file.change().getAfterRevision() instanceof CurrentContentRevision;
-		CharSequence text = document == null ? null : document.getImmutableCharSequence();
+		CharSequence text = ReadAction.compute(() -> {
+			Document document = FileDocumentManager.getInstance().getDocument(workingFile);
+			return document == null ? null : document.getImmutableCharSequence();
+		});
 		if (text == null || current && StringUtil.equals(text, file.afterText())) {
 			// the member offsets are still valid; skip reparsing
 			new OpenFileDescriptor(project, workingFile, member.afterOffset()).navigate(true);
