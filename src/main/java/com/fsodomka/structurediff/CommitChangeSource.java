@@ -10,6 +10,8 @@ import com.intellij.openapi.vcs.changes.ui.VcsTreeModelData;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.vcs.log.CommitId;
 import com.intellij.vcs.log.VcsLogCommitSelection;
+import com.intellij.vcs.log.VcsLogUi;
+import com.intellij.vcs.log.impl.VcsLogContentProvider;
 import com.intellij.vcs.log.impl.VcsLogManager;
 import com.intellij.vcs.log.impl.VcsProjectLog;
 import com.intellij.vcs.log.ui.MainVcsLogUi;
@@ -141,12 +143,11 @@ final class CommitChangeSource implements ChangeSource, Disposable {
 	}
 
 	/**
-	 * The main Git log tab. In 2026.2, {@link VcsProjectLog#getMainLogUi()} (and getMainUi(), which delegates to it) is read
-	 * once when the project log is created, before the log manager exists, so it stays null, and
+	 * The main Git log tab. In 2026.2, VcsProjectLog.getMainLogUi() (deprecated, and getMainUi(), which delegates to it) is
+	 * read once when the project log is created, before the log manager exists, so it stays null, and
 	 * {@link VcsLogManager#getLogUis()} lists only the additional tabs. The log manager's getMainUi() is current, but its
-	 * class IdeVcsLogManager does not exist in 2024.2, where getMainLogUi() looks the tab up on every call.
+	 * class IdeVcsLogManager does not exist in 2024.2, where getLogUis() lists the main tab too, under its fixed id.
 	 */
-	@SuppressWarnings("deprecation")
 	private static MainVcsLogUi mainLogUi(VcsProjectLog log) {
 		VcsLogManager manager = log.getLogManager();
 		if (manager == null) {
@@ -154,7 +155,12 @@ final class CommitChangeSource implements ChangeSource, Disposable {
 		}
 		Method getMainUi = GET_MAIN_UI.get(manager.getClass()).orElse(null);
 		if (getMainUi == null) {
-			return log.getMainLogUi();
+			for (VcsLogUi ui : manager.getLogUis()) {
+				if (ui instanceof MainVcsLogUi main && VcsLogContentProvider.MAIN_LOG_ID.equals(ui.getId())) {
+					return main;
+				}
+			}
+			return null;
 		}
 		try {
 			return getMainUi.invoke(manager) instanceof MainVcsLogUi ui ? ui : null;
