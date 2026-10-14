@@ -39,7 +39,7 @@ import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangeListListener;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
-import com.intellij.openapi.vcs.changes.ContentRevision;
+import com.intellij.openapi.vcs.changes.ChangesUtil;
 import com.intellij.openapi.vcs.changes.CurrentContentRevision;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.ColorUtil;
@@ -264,7 +264,11 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		popup.add(treeAction("Jump to Source", AllIcons.Actions.EditSource, IdeActions.ACTION_EDIT_SOURCE,
 				() -> selectedWorkingFile() != null, this::jumpToSource));
 		popup.add(treeAction("Copy Path", AllIcons.Actions.Copy, null, () -> selectedFile() != null, () -> {
-			CopyPasteManager.getInstance().setContents(new StringSelection(FileUtil.toSystemDependentName(selectedFile().path())));
+			FileDiff file = selectedFile();
+			if (file == null) {
+				return false;
+			}
+			CopyPasteManager.getInstance().setContents(new StringSelection(FileUtil.toSystemDependentName(file.path())));
 			return true;
 		}));
 		PopupHandler.installPopupMenu(tree, popup, "StructureDiffPopup");
@@ -331,9 +335,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 					ProjectLevelVcsManager vcsManager = ProjectLevelVcsManager.getInstance(project);
 					Map<String, VirtualFile> roots = new HashMap<>();
 					for (FileDiff file : loaded) {
-						ContentRevision revision = file.change().getAfterRevision() != null
-								? file.change().getAfterRevision() : file.change().getBeforeRevision();
-						VirtualFile root = vcsManager.getVcsRootFor(revision.getFile());
+						VirtualFile root = vcsManager.getVcsRootFor(ChangesUtil.getFilePath(file.change()));
 						if (root != null) {
 							roots.put(file.path(), root);
 						}
@@ -389,7 +391,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		/** 1 for the first half of the flash, then fading to 0. */
 		double strength(long now) {
 			double remaining = 1 - (double) (now - start) / FLASH_MILLIS;
-			return Math.max(0, Math.min(1, remaining * 2));
+			return Math.clamp(remaining * 2, 0, 1);
 		}
 
 		boolean expired(long now) {
@@ -485,21 +487,23 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		}
 
 		summary.clear();
+		// clear() keeps the tooltip; appendLines sets it only when there are changed lines
+		summary.setToolTipText(null);
 		summary.append(allFiles.size() + (allFiles.size() == 1 ? " file" : " files"), SimpleTextAttributes.REGULAR_ATTRIBUTES);
 		appendCount(summary, "+", total[0], FileStatus.ADDED, SimpleTextAttributes.STYLE_BOLD);
 		appendCount(summary, "~", total[1], FileStatus.MODIFIED, SimpleTextAttributes.STYLE_BOLD);
-		appendCount(summary, "\u2212", total[2], FileStatus.DELETED, SimpleTextAttributes.STYLE_BOLD);
+		appendCount(summary, "−", total[2], FileStatus.DELETED, SimpleTextAttributes.STYLE_BOLD);
 		appendLines(summary, linesAdded, linesRemoved, SimpleTextAttributes.GRAYED_ATTRIBUTES);
 	}
 
 	/**
-	 * Changed lines as one grey, unsigned number with a unit, so only the colored member counts use +/~/\u2212;
+	 * Changed lines as one grey, unsigned number with a unit, so only the colored member counts use +/~/−;
 	 * the added/removed split is in the tooltip.
 	 */
 	private static void appendLines(SimpleColoredComponent component, int added, int removed, SimpleTextAttributes attributes) {
 		int lines = added + removed;
 		if (lines > 0) {
-			component.append("   \u00b7 " + lines + (lines == 1 ? " line" : " lines"), attributes);
+			component.append("   · " + lines + (lines == 1 ? " line" : " lines"), attributes);
 			component.setToolTipText(linesText(added, removed));
 		}
 	}
@@ -518,11 +522,11 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	}
 
 	private static String keyPart(Object userObject) {
-		if (userObject instanceof Ghost ghost) {
-			return keyPart(ghost.item());
+		if (userObject instanceof Ghost(Object item)) {
+			return keyPart(item);
 		}
-		if (userObject instanceof RepoNode repo) {
-			return "repo:" + repo.root().getPath();
+		if (userObject instanceof RepoNode(VirtualFile root)) {
+			return "repo:" + root.getPath();
 		}
 		if (userObject instanceof FileDiff file) {
 			return file.path();
@@ -774,17 +778,17 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			DefaultMutableTreeNode node = (DefaultMutableTreeNode) value;
 			Object item = node.getUserObject();
 			boolean ghost = item instanceof Ghost;
-			if (item instanceof Ghost g) {
-				item = g.item();
+			if (item instanceof Ghost(Object ghostItem)) {
+				item = ghostItem;
 			}
 			Flash flash = flashes.isEmpty() ? null : flashes.get(keyOf(node));
 			// a removed node that vanished came back (removal undone): it flashes as added, not as gone
 			boolean restored = ghost && flash != null && flash.status() == FileStatus.DELETED;
 			Color background = flash == null ? null : flashBackground(flash, ghost, restored);
-			if (item instanceof RepoNode repo) {
+			if (item instanceof RepoNode(VirtualFile root)) {
 				setIcon(AllIcons.Nodes.Module);
-				append(repo.root().getName(), SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
-				append("  " + repo.root().getPresentableUrl(), SimpleTextAttributes.GRAYED_ATTRIBUTES);
+				append(root.getName(), SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
+				append("  " + root.getPresentableUrl(), SimpleTextAttributes.GRAYED_ATTRIBUTES);
 				setToolTipText(null);
 			}
 			else if (item instanceof FileDiff file) {
@@ -799,7 +803,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 					count(file.members(), counts);
 					appendCount(this, "+", counts[0], FileStatus.ADDED, SimpleTextAttributes.STYLE_SMALLER);
 					appendCount(this, "~", counts[1], FileStatus.MODIFIED, SimpleTextAttributes.STYLE_SMALLER);
-					appendCount(this, "\u2212", counts[2], FileStatus.DELETED, SimpleTextAttributes.STYLE_SMALLER);
+					appendCount(this, "−", counts[2], FileStatus.DELETED, SimpleTextAttributes.STYLE_SMALLER);
 				}
 				if (!ghost) {
 					appendLines(this, file.linesAdded(), file.linesRemoved(), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES);

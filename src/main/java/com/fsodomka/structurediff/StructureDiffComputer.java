@@ -18,6 +18,7 @@ import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.changes.Change;
+import com.intellij.openapi.vcs.changes.ChangesUtil;
 import com.intellij.openapi.vcs.changes.ContentRevision;
 import com.intellij.openapi.vcs.changes.CurrentContentRevision;
 import com.intellij.psi.PsiElement;
@@ -25,6 +26,7 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiFileFactory;
 import com.intellij.util.diff.Diff;
 import com.intellij.util.diff.FilesTooBigForDiffException;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.Icon;
 import java.util.ArrayDeque;
@@ -46,10 +48,12 @@ final class StructureDiffComputer {
 	private StructureDiffComputer() {
 	}
 
-	/** Structure element of one file version. */
-	/** {@code text} is the element source, used for the line diff; the label when there is no PSI element. */
-	private record Member(String key, String label, Icon icon, String text, String normalizedText, int offset,
-						  boolean container, List<Member> children) {
+	/**
+	 * Structure element of one file version. {@code text} is the element source, used for the line diff; the label when
+	 * there is no PSI element. {@code normalizedText} is compared to detect changes, see {@link #normalizedText}.
+	 */
+	private record Member(String key, String label, Icon icon, PsiElement element, String text, String normalizedText,
+						  int offset, boolean container, List<Member> children) {
 	}
 
 	/**
@@ -61,7 +65,7 @@ final class StructureDiffComputer {
 			"JSFunction", "JSVariable", "KtNamedFunction", "KtProperty");
 	private static final ClassValue<Boolean> IS_CONTAINER = new ClassValue<>() {
 		@Override
-		protected Boolean computeValue(Class<?> type) {
+		protected Boolean computeValue(@NotNull Class<?> type) {
 			return !isLeafType(type);
 		}
 	};
@@ -99,7 +103,7 @@ final class StructureDiffComputer {
 	private static FileDiff load(Change change, FileStatus status, Map<String, String> revisionCache) {
 		ContentRevision before = change.getBeforeRevision();
 		ContentRevision after = change.getAfterRevision();
-		FilePath path = after != null ? after.getFile() : before.getFile();
+		FilePath path = ChangesUtil.getFilePath(change);
 		FileType fileType = path.getFileType();
 		if (fileType.isBinary()) {
 			// no structure; decoding binary revisions to strings would only waste memory and VCS I/O on every refresh
@@ -224,10 +228,47 @@ final class StructureDiffComputer {
 			String text = elementText == null ? label : elementText;
 			int offset = element == null ? -1 : element.getTextOffset();
 			boolean container = element != null && IS_CONTAINER.get(element.getClass());
-			result.add(new Member(key, label, presentation.getIcon(false), text, text.replaceAll("\\s+", ""), offset, container,
-					members(child, file)));
+			List<Member> children = members(child, file);
+			String normalized = element == null ? label : normalizedText(element, children);
+			result.add(new Member(key, label, presentation.getIcon(false), element, text, normalized, offset, container, children));
 		}
 		return result;
+	}
+
+	/**
+	 * Tokens of the element joined by single spaces, so whitespace-only changes are ignored but whitespace inside
+	 * tokens (string literals, comments) is not. Child members are replaced by their keys: their changes are compared
+	 * separately, and the keys keep a reordering of children a change of the parent.
+	 */
+	private static String normalizedText(PsiElement element, List<Member> children) {
+		Map<PsiElement, String> childKeys = new IdentityHashMap<>();
+		for (Member child : children) {
+			if (child.element() != null) {
+				childKeys.put(child.element(), child.key());
+			}
+		}
+		StringBuilder result = new StringBuilder();
+		// iterative depth-first walk: deeply nested expressions would overflow the stack of a recursive one
+		PsiElement e = element;
+		while (true) {
+			String childKey = childKeys.get(e);
+			PsiElement first = childKey == null ? e.getFirstChild() : null;
+			if (first != null) {
+				e = first;
+				continue;
+			}
+			String token = childKey != null ? '\0' + childKey : e.getText();
+			if (!StringUtil.isEmptyOrSpaces(token)) {
+				result.append(token).append(' ');
+			}
+			while (e != element && e.getNextSibling() == null) {
+				e = e.getParent();
+			}
+			if (e == element) {
+				return result.toString();
+			}
+			e = e.getNextSibling();
+		}
 	}
 
 	private static List<MemberDiff> diff(List<Member> before, List<Member> after) {
