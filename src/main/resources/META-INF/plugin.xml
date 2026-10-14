@@ -18,6 +18,8 @@
         a content root (usually the repository root) are skipped.</li>
       <li><b>Flash Changes</b> &ndash; briefly highlight members and files that appeared, changed status or
         disappeared; removed nodes stay visible, struck out, until the highlight fades.</li>
+      <li><b>Follow Git Log</b> &ndash; show the commits selected in the main Git log tab instead of the uncommitted
+        changes, which are shown again while no commit is selected. The tool window title shows the selected commit.</li>
     </ul>
 
     <h3>Tree</h3>

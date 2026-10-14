@@ -14,8 +14,11 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.IdeActions;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.ide.CopyPasteManager;
+import com.intellij.openapi.util.IconLoader;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.ui.PopupHandler;
 import com.intellij.openapi.actionSystem.ActionToolbar;
@@ -23,24 +26,21 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.actionSystem.ToggleAction;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.ui.SimpleToolWindowPanel;
-import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 import com.intellij.openapi.vcs.changes.Change;
-import com.intellij.openapi.vcs.changes.ChangeListListener;
-import com.intellij.openapi.vcs.changes.ChangeListManager;
 import com.intellij.openapi.vcs.changes.ChangesUtil;
+import com.intellij.openapi.vcs.changes.ContentRevision;
 import com.intellij.openapi.vcs.changes.CurrentContentRevision;
+import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.ColoredTreeCellRenderer;
@@ -51,7 +51,10 @@ import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.TreeUIHelper;
 import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.Alarm;
+import com.intellij.util.diff.Diff;
+import com.intellij.util.diff.FilesTooBigForDiffException;
 import com.intellij.util.concurrency.AppExecutorUtil;
+import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.TreeUtil;
@@ -66,8 +69,13 @@ import javax.swing.ToolTipManager;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
@@ -91,24 +99,21 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Tree of changed files and their added/modified/removed members. Refreshes on change list updates.
+ * Tree of changed files and their added/modified/removed members. Refreshes when its {@link ChangeSource} reports changes.
  */
 final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposable {
 	private final Project project;
+	private final ChangeSource source;
 	private final Tree tree = new Tree(new DefaultTreeModel(new DefaultMutableTreeNode()));
 	private final Alarm alarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, this);
 	private static final long FLASH_MILLIS = 4000;
+	private static final Icon UNVERSIONED_NOT_APPLICABLE_ICON = crossedOut(IconLoader.getDisabledIcon(AllIcons.Vcs.ShowUnversionedFiles));
 	/**
 	 * Recent changes by node key. Nodes that appeared or changed status get a background that fades out;
 	 * nodes that disappeared stay in the tree as {@link Ghost}s until their flash ends.
 	 */
 	private final Map<List<String>, Flash> flashes = new HashMap<>();
-	/**
-	 * Whether the change list finished its first update after VCS initialization. Until then, files and members
-	 * appear because the IDE is loading, not because they changed.
-	 */
-	private volatile boolean vcsReady;
-	/** Whether a refresh result after {@link #vcsReady} was shown; it is the initial state, not changes to flash, even if a later one starts from an empty tree. */
+	/** Whether a refresh result with {@link ChangeSource#highlightChanges()} was shown; it is the initial state, not changes to flash, even if a later one starts from an empty tree. */
 	private boolean baselineShown;
 	private final Timer fadeTimer = new Timer(50, e -> fadeStep());
 	private static final String SHOW_NESTED_KEY = "structureDiff.showNested";
@@ -120,7 +125,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private volatile List<FileDiff> files = List.of();
 	/** VCS root of each file path; files are grouped by root when there is more than one. */
 	private Map<String, VirtualFile> vcsRoots = Map.of();
-	/** Contents of committed before-revisions, which never change; loading them is VCS I/O. */
+	/** Contents of committed revisions, which never change; loading them is VCS I/O. */
 	private final Map<String, String> revisionCache = new ConcurrentHashMap<>();
 	private boolean showNested = PropertiesComponent.getInstance().getBoolean(SHOW_NESTED_KEY, false);
 	private boolean showUnversioned = PropertiesComponent.getInstance().getBoolean(SHOW_UNVERSIONED_KEY, true);
@@ -128,9 +133,11 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	/** Paths of the unversioned files in {@link #files}; they are loaded even when hidden, so the toggle needs no refresh. */
 	private volatile Set<String> unversionedPaths = Set.of();
 
-	StructureDiffPanel(Project project) {
+	/** @param extraActions added to the toolbar before Expand All and Collapse All */
+	StructureDiffPanel(Project project, ChangeSource source, AnAction... extraActions) {
 		super(true, true);
 		this.project = project;
+		this.source = source;
 
 		tree.setRootVisible(false);
 		tree.setCellRenderer(new Renderer());
@@ -192,10 +199,11 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				return ActionUpdateThread.EDT;
 			}
 		});
+		// kept, crossed out, where not applicable, so the toolbar layout stays the same when switching sources
 		group.add(new ToggleAction("Show Unversioned Files", null, AllIcons.Vcs.ShowUnversionedFiles) {
 			@Override
 			public boolean isSelected(@NotNull AnActionEvent e) {
-				return showUnversioned;
+				return source.hasUnversioned() && showUnversioned;
 			}
 
 			@Override
@@ -203,6 +211,16 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				showUnversioned = state;
 				PropertiesComponent.getInstance().setValue(SHOW_UNVERSIONED_KEY, state, true);
 				show(files, false);
+			}
+
+			@Override
+			public void update(@NotNull AnActionEvent e) {
+				super.update(e);
+				if (!source.hasUnversioned()) {
+					e.getPresentation().setEnabled(false);
+					e.getPresentation().setDescription("Commits have no unversioned files");
+					e.getPresentation().setDisabledIcon(UNVERSIONED_NOT_APPLICABLE_ICON);
+				}
 			}
 
 			@Override
@@ -233,6 +251,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				return ActionUpdateThread.EDT;
 			}
 		});
+		group.addAll(extraActions);
 		group.add(CommonActionsManager.getInstance().createExpandAllAction(expander, tree));
 		group.add(CommonActionsManager.getInstance().createCollapseAllAction(expander, tree));
 		ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar("StructureDiff", group, true);
@@ -243,17 +262,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		top.add(summary, BorderLayout.SOUTH);
 		setToolbar(top);
 
-		project.getMessageBus().connect(this).subscribe(ChangeListListener.TOPIC, new ChangeListListener() {
-			@Override
-			public void changeListUpdateDone() {
-				scheduleRefresh();
-			}
-		});
-		ProjectLevelVcsManager.getInstance(project).runAfterInitialization(
-				() -> ChangeListManager.getInstance(project).invokeAfterUpdate(false, () -> {
-					vcsReady = true;
-					scheduleRefresh();
-				}));
+		source.subscribe(this::scheduleRefresh, this);
 		scheduleRefresh();
 	}
 
@@ -307,25 +316,26 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	/** Runs on a pooled thread. */
 	private void refresh() {
 		int current = generation.incrementAndGet();
-		boolean ready = vcsReady;
-		ChangeListManager changeListManager = ChangeListManager.getInstance(project);
-		ProjectFileIndex fileIndex = ProjectFileIndex.getInstance(project);
-		// unversioned project files, except those directly in a content root, which skips scratch files like out.json in the project root
-		List<FilePath> unversioned = ApplicationManager.getApplication().runReadAction((Computable<List<FilePath>>) () -> changeListManager.getUnversionedFilesPaths().stream()
-				.filter(path -> {
-					VirtualFile file = path.getVirtualFile();
-					return file != null && fileIndex.isInContent(file)
-							&& !Objects.equals(file.getParent(), fileIndex.getContentRootForFile(file));
-				})
-				.toList());
-		Collection<Change> changes = changeListManager.getAllChanges();
-		List<FileDiff> loaded = Stream.concat(
-						changes.stream().map(change -> StructureDiffComputer.load(change, revisionCache)),
-						unversioned.stream().map(StructureDiffComputer::loadUnversioned))
-				.sorted(Comparator.comparing(FileDiff::path, String.CASE_INSENSITIVE_ORDER))
-				.toList();
-		Set<String> usedRevisions = changes.stream().map(change -> StructureDiffComputer.revisionKey(change.getBeforeRevision()))
-				.filter(Objects::nonNull).collect(Collectors.toSet());
+		boolean highlight = source.highlightChanges();
+		List<FilePath> unversioned = source.unversioned();
+		Collection<Change> changes = source.changes();
+		// loading is VCS I/O, one process per revision; stop when a newer refresh started, e.g. another commit was selected
+		List<FileDiff> loaded = new ArrayList<>(changes.size() + unversioned.size());
+		for (Change change : changes) {
+			if (current != generation.get()) {
+				return;
+			}
+			loaded.add(StructureDiffComputer.load(change, revisionCache));
+		}
+		for (FilePath path : unversioned) {
+			if (current != generation.get()) {
+				return;
+			}
+			loaded.add(StructureDiffComputer.loadUnversioned(path));
+		}
+		loaded.sort(Comparator.comparing(FileDiff::path, String.CASE_INSENSITIVE_ORDER));
+		Set<String> usedRevisions = changes.stream().flatMap(change -> Stream.of(change.getBeforeRevision(), change.getAfterRevision()))
+				.map(StructureDiffComputer::revisionKey).filter(Objects::nonNull).collect(Collectors.toSet());
 		revisionCache.keySet().retainAll(usedRevisions);
 		Map<String, FileDiff> previous = files.stream().filter(f -> f.members() != null)
 				.collect(Collectors.toMap(FileDiff::path, f -> f, (a, b) -> a));
@@ -360,10 +370,41 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 						files = snapshot.files();
 						vcsRoots = snapshot.roots();
 						unversionedPaths = snapshot.unversioned();
-						show(snapshot.files(), ready);
+						show(snapshot.files(), highlight);
 					}
 				})
 				.submit(AppExecutorUtil.getAppExecutorService());
+	}
+
+	/** {@code icon} with a diagonal line across it. */
+	private static Icon crossedOut(Icon icon) {
+		return new Icon() {
+			@Override
+			public void paintIcon(Component c, Graphics g, int x, int y) {
+				icon.paintIcon(c, g, x, y);
+				Graphics2D g2 = (Graphics2D) g.create();
+				try {
+					g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+					g2.setColor(UIUtil.getLabelDisabledForeground());
+					g2.setStroke(new BasicStroke(JBUIScale.scale(1.5f)));
+					int inset = JBUIScale.scale(1);
+					g2.drawLine(x + inset, y + getIconHeight() - inset, x + getIconWidth() - inset, y + inset);
+				}
+				finally {
+					g2.dispose();
+				}
+			}
+
+			@Override
+			public int getIconWidth() {
+				return icon.getIconWidth();
+			}
+
+			@Override
+			public int getIconHeight() {
+				return icon.getIconHeight();
+			}
+		};
 	}
 
 	private record Snapshot(List<FileDiff> files, Map<String, VirtualFile> roots, Set<String> unversioned) {
@@ -712,11 +753,14 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		return node != null && node.getUserObject() instanceof MemberDiff member ? member : null;
 	}
 
-	/** Working copy of the selected file; null when it was deleted. */
+	/** Working copy of the selected file, for a commit the file at its path after the commit; null when it was deleted. */
 	private VirtualFile selectedWorkingFile() {
 		FileDiff file = selectedFile();
-		return file != null && file.change().getAfterRevision() instanceof CurrentContentRevision current
-				? current.getVirtualFile() : null;
+		ContentRevision after = file == null ? null : file.change().getAfterRevision();
+		if (after instanceof CurrentContentRevision current) {
+			return current.getVirtualFile();
+		}
+		return after == null ? null : LocalFileSystem.getInstance().findFileByPath(after.getFile().getPath());
 	}
 
 	/** Opens the file in the editor at the selected member; a removed member opens the diff instead. */
@@ -729,8 +773,44 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		if (member != null && member.afterOffset() < 0) {
 			return openSelected();
 		}
-		int offset = member == null ? 0 : member.afterOffset();
-		new OpenFileDescriptor(project, workingFile, offset).navigate(true);
+		FileDiff file = Objects.requireNonNull(selectedFile());
+		if (member == null) {
+			new OpenFileDescriptor(project, workingFile).navigate(true);
+			return true;
+		}
+		Document document = FileDocumentManager.getInstance().getDocument(workingFile);
+		boolean current = file.change().getAfterRevision() instanceof CurrentContentRevision;
+		CharSequence text = document == null ? null : document.getImmutableCharSequence();
+		if (text == null || current && StringUtil.equals(text, file.afterText())) {
+			// the member offsets are still valid; skip reparsing
+			new OpenFileDescriptor(project, workingFile, member.afterOffset()).navigate(true);
+			return true;
+		}
+		List<MemberDiff> path = new ArrayList<>();
+		for (DefaultMutableTreeNode node = (DefaultMutableTreeNode) tree.getLastSelectedPathComponent();
+			 node != null && node.getUserObject() instanceof MemberDiff pathMember; node = (DefaultMutableTreeNode) node.getParent()) {
+			path.addFirst(pathMember);
+		}
+		// parsing the current text and diffing it against the committed one can take long on large files
+		ReadAction.nonBlocking(() -> {
+					int offset = StructureDiffComputer.currentOffset(project, workingFile.getName(), workingFile.getFileType(), text, path);
+					if (offset >= 0 || current) {
+						return new int[]{offset >= 0 ? offset : member.afterOffset(), -1};
+					}
+					// the member is gone from the working copy: map its line in the committed text onto the current text
+					int line = StringUtil.offsetToLineNumber(file.afterText(), member.afterOffset());
+					try {
+						line = Math.max(0, Diff.translateLine(file.afterText(), text, line, true));
+					}
+					catch (FilesTooBigForDiffException ignored) {
+					}
+					return new int[]{-1, line};
+				})
+				.expireWith(this)
+				.finishOnUiThread(ModalityState.defaultModalityState(), target -> (target[1] < 0
+						? new OpenFileDescriptor(project, workingFile, target[0])
+						: new OpenFileDescriptor(project, workingFile, target[1], 0)).navigate(true))
+				.submit(AppExecutorUtil.getAppExecutorService());
 		return true;
 	}
 

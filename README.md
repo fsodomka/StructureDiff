@@ -13,6 +13,9 @@ of each changed file, in a tree like the Structure tool window. It works for eve
 - **Show Unversioned Files**: include new files not yet added to VCS.
 - **Flash Changes**: briefly highlight members and files that appeared, changed status or disappeared. Removed nodes
   stay visible, struck out, until the highlight fades.
+- **Follow Git Log**: show the commits selected in the main Git log tab (several selected commits are combined, like
+  the log's changes view) instead of the uncommitted changes, which are shown again while no commit is selected. The
+  tool window title shows the selected commit. Jump to Source opens the current file at the member's line in the commit.
 
 ### Tree
 
@@ -35,7 +38,7 @@ of each changed file, in a tree like the Structure tool window. It works for eve
 
 ## Requirements
 
-- IntelliJ-based IDE, build 262 (2026.2) or newer
+- IntelliJ-based IDE, build 242 (2024.2) or newer
 - JDK 25 for building (Gradle toolchain; the plugin targets Java 21 bytecode)
 
 ## Build

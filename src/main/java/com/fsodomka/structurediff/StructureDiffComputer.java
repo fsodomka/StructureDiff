@@ -110,7 +110,7 @@ final class StructureDiffComputer {
 			return new FileDiff(change, path.getPath(), fileType, status, null, null, 0, 0, null);
 		}
 		String beforeText = cachedContent(before, revisionCache);
-		String afterText = content(after);
+		String afterText = cachedContent(after, revisionCache);
 		int[] lines = changedLines(StringUtil.notNullize(beforeText), StringUtil.notNullize(afterText));
 		return new FileDiff(change, path.getPath(), fileType, status, beforeText, afterText, lines[0], lines[1], null);
 	}
@@ -209,21 +209,75 @@ final class StructureDiffComputer {
 		}
 	}
 
-	private static List<Member> members(TreeElement parent, PsiFile file) {
-		List<Member> result = new ArrayList<>();
+	/**
+	 * Offset in {@code text} of the member at {@code path}, matched by key like {@link #diff} matches members, else by name;
+	 * -1 when the file type has no tree-based structure view or the member is not there. Call inside a read action.
+	 */
+	static int currentOffset(Project project, String fileName, FileType fileType, CharSequence text, List<MemberDiff> path) {
+		// parsed like the revisions, not taken from the document: the PSI of an uncommitted document is stale, and committing needs the write-intent lock
+		PsiFile psi = PsiFileFactory.getInstance(project).createFileFromText(fileName, fileType, text);
+		StructureViewBuilder builder = LanguageStructureViewBuilder.getInstance().getStructureViewBuilder(psi);
+		if (!(builder instanceof TreeBasedStructureViewBuilder treeBuilder)) {
+			return -1;
+		}
+		StructureViewModel model = treeBuilder.createStructureViewModel(null);
+		try {
+			TreeElement current = model.getRoot();
+			for (MemberDiff member : path) {
+				Map<String, TreeElement> children = keyedChildren(current, psi);
+				current = children.get(member.key());
+				if (current == null) {
+					String name = name(member.label());
+					current = children.values().stream()
+							.filter(c -> name.equals(name(label(c))))
+							.findFirst().orElse(null);
+				}
+				if (current == null) {
+					return -1;
+				}
+			}
+			PsiElement element = element(current);
+			return element == null ? -1 : element.getTextOffset();
+		}
+		finally {
+			Disposer.dispose(model);
+		}
+	}
+
+	/** Children of {@code parent} declared in {@code file} by key: the label, with {@code #n} for the n-th same label. */
+	private static Map<String, TreeElement> keyedChildren(TreeElement parent, PsiFile file) {
+		Map<String, TreeElement> result = new LinkedHashMap<>();
 		Map<String, Integer> labelCounts = new HashMap<>();
 		for (TreeElement child : parent.getChildren()) {
 			ProgressManager.checkCanceled();
-			Object value = child instanceof StructureViewTreeElement e ? e.getValue() : null;
-			PsiElement element = value instanceof PsiElement p ? p : null;
+			PsiElement element = element(child);
 			if (element != null && element.getContainingFile() != file) {
 				continue; // inherited members
 			}
-			ItemPresentation presentation = child.getPresentation();
-			String label = StringUtil.notNullize(presentation.getPresentableText());
+			String label = label(child);
 			// same-named elements (e.g. JS overloads without types): disambiguate by occurrence order
 			int count = labelCounts.merge(label, 1, Integer::sum);
-			String key = count == 1 ? label : label + "#" + count;
+			result.put(count == 1 ? label : label + "#" + count, child);
+		}
+		return result;
+	}
+
+	private static PsiElement element(TreeElement child) {
+		return child instanceof StructureViewTreeElement e && e.getValue() instanceof PsiElement p ? p : null;
+	}
+
+	private static String label(TreeElement child) {
+		return StringUtil.notNullize(child.getPresentation().getPresentableText());
+	}
+
+	private static List<Member> members(TreeElement parent, PsiFile file) {
+		List<Member> result = new ArrayList<>();
+		for (Map.Entry<String, TreeElement> entry : keyedChildren(parent, file).entrySet()) {
+			String key = entry.getKey();
+			TreeElement child = entry.getValue();
+			PsiElement element = element(child);
+			ItemPresentation presentation = child.getPresentation();
+			String label = StringUtil.notNullize(presentation.getPresentableText());
 			String elementText = element == null ? null : element.getText();
 			String text = elementText == null ? label : elementText;
 			int offset = element == null ? -1 : element.getTextOffset();

@@ -31,6 +31,9 @@ def platformLocalPath = providers.gradleProperty('platformLocalPath').filter { !
 dependencies {
     intellijPlatform {
         intellijIdea(providers.gradleProperty('platformVersion'))
+        // Git log and its changes browser, for "Follow Git Log"
+        bundledModule('intellij.platform.vcs.impl')
+        bundledModule('intellij.platform.vcs.log.impl')
     }
 }
 
