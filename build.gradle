@@ -1,3 +1,4 @@
+import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 import org.jetbrains.intellij.platform.gradle.tasks.RunIdeTask
 
 plugins {
@@ -6,7 +7,7 @@ plugins {
 }
 
 group = 'com.fsodomka.structurediff'
-version = '2026.3.0'
+version = '2026.4.0'
 
 repositories {
     mavenCentral()
@@ -34,7 +35,14 @@ dependencies {
         // Git log and its changes browser, for "Follow Git Log"
         bundledModule('intellij.platform.vcs.impl')
         bundledModule('intellij.platform.vcs.log.impl')
+        // merge base and diff with the working tree, for "Branch vs main"
+        bundledPlugin('Git4Idea')
+        testBundledPlugin('com.intellij.java')
+        testFramework(TestFrameworkType.Platform.INSTANCE)
     }
+    testImplementation 'junit:junit:4.13.2'
+    // the platform test framework needs it at runtime
+    testImplementation 'org.opentest4j:opentest4j:1.3.0'
 }
 
 intellijPlatform {

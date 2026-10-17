@@ -1,40 +1,36 @@
 # Structure Diff
 
-IntelliJ plugin that shows uncommitted changes at member level: added, modified and removed classes, methods and fields
-of each changed file, in a tree like the Structure tool window. It works for every language with a Structure view
-(Java, TypeScript, JavaScript, Kotlin, ...) and refreshes automatically when the VCS change list updates.
+IntelliJ plugin for reviewing what AI coding agents changed — **Claude Code**, **OpenAI Codex**, **DeepSeek**, Cursor,
+Copilot, Gemini CLI and others. It shows changes at member level (added, modified and removed classes, methods and
+fields) in a tree like the Structure tool window, and shows AI code-review findings (SARIF) right in the editor.
+Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaScript, ...).
 
-## Features
+## Structure Diff tool window
 
-### Toolbar
+- **Modes**: **Uncommitted** changes; **Branch vs main** — everything the branch changed since it forked from
+  `main`/`master`, like a merge request (needs Git); **Follow Git Log** — the commits selected in the Git log.
+- **Export Diff for Review** — saves the changes to `reviews/<timestamp>-changes.diff` and copies the
+  review skill command for it to paste into your agent. A new `reviews/` gets a `.gitignore`. The directory, the
+  command (default `/adversarial-review`) and whether to copy it are set in **Settings | Tools | Structure
+  Diff**.
+- Toggles: **Show Nested Changes** (inside functions and object literals), **Show Unversioned Files** (except files
+  directly in the repository root),
+  **Flash Changes** (briefly highlight what appeared, changed or disappeared).
+- Per file and member: `+` added, `~` modified, `−` removed counts, changed lines, renames/moves, and old vs new
+  signature in the tooltip. Multiple VCS roots are grouped.
+- **Double-click**/**Enter** jumps to source, **middle-click** opens the diff at the member; context menu: Show Diff,
+  Jump to Source, Copy Path.
 
-- **Refresh**: recompute the tree now.
-- **Show Nested Changes**: show changes inside functions, components and object literals, not only inside classes.
-- **Show Unversioned Files**: include new files not yet added to VCS.
-- **Flash Changes**: briefly highlight members and files that appeared, changed status or disappeared. Removed nodes
-  stay visible, struck out, until the highlight fades.
-- **Follow Git Log**: show the commits selected in the main Git log tab (several selected commits are combined, like
-  the log's changes view) instead of the uncommitted changes, which are shown again while no commit is selected. The
-  tool window title shows the selected commit. Jump to Source opens the current file at the member's line in the commit.
+## Review Findings
 
-### Tree
-
-- The summary line below the toolbar shows the number of changed files, added (`+`), modified (`~`) and removed (`−`)
-  members, and the total number of changed lines.
-- **File nodes** show the file name in its VCS status color, the same member counts and changed line count, and the
-  directory. A renamed or moved file shows its old name or path after `←`. The tooltip lists lines added and removed
-  and where the file was moved or renamed from.
-- **Member nodes** show the member in its status color; removed members are struck out. The tooltip shows the old and
-  new signature when it changed, and the lines added and removed.
-- An added or removed member with children counts once; a modified container counts only through its changed children.
-- When changes span several VCS roots, files are grouped by root.
-
-### Navigation
-
-- **Double-click** or **Enter**: jump to the member in the source.
-- **Middle-click**: open the diff scrolled to that member.
-- Context menu: **Show Diff**, **Jump to Source** and **Copy Path**, with the IDE's shortcuts for Show Diff and Jump to
-  Source.
+- When a `reviews/*.sarif` (or `.sarif.json`) file appears in a repository root, or you pick one from anywhere with
+  **Open Review › Open File...**, its findings are highlighted in the editor with a gutter
+  icon; the tooltip shows the finding and suggested fix. A newer review replaces the previous one.
+- The **Review Findings** tool window lists them by file and severity; double-click or Enter jumps to the code.
+  Open an older review, Reload, or Clear All.
+- Findings follow your edits; when the code is gone they are greyed as possibly fixed.
+- **Dismiss**, **Restore** and **Copy** findings; dismissed ones stay dismissed in later reviews.
+- The Structure Diff tree marks members and files that have findings (`⚠N`), also in Follow Git Log mode.
 
 ## Requirements
 

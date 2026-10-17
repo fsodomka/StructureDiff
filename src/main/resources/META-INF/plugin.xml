@@ -4,54 +4,62 @@
     <vendor>Frantisek Sodomka</vendor>
 
     <description><![CDATA[
-    <p>Shows uncommitted changes at member level: added, modified and removed classes, methods and fields
-    of each changed file, in a tree like the Structure tool window.</p>
-    <p>Language-agnostic: works for every language with a Structure view (Java, TypeScript, JavaScript, Kotlin, ...).
-    The tree refreshes automatically when the VCS change list updates.</p>
+    <p>Review what AI coding agents changed &ndash; <b>Claude Code</b>, <b>OpenAI Codex</b>, <b>DeepSeek</b>, Cursor,
+    Copilot, Gemini CLI and others. Shows changes at member level: added, modified and removed classes, methods and
+    fields of each changed file, in a tree like the Structure tool window, and shows AI code-review findings
+    (SARIF) right in the editor.</p>
+    <p>Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaScript, ...) and refreshes
+    automatically.</p>
 
-    <h3>Toolbar</h3>
+    <h3>Structure Diff tool window</h3>
     <ul>
-      <li><b>Refresh</b> &ndash; recompute the tree now.</li>
-      <li><b>Show Nested Changes</b> &ndash; show changes inside functions, components and object literals,
-        not only inside classes.</li>
-      <li><b>Show Unversioned Files</b> &ndash; include new files not yet added to VCS. Unversioned files directly in
-        a content root (usually the repository root) are skipped.</li>
-      <li><b>Flash Changes</b> &ndash; briefly highlight members and files that appeared, changed status or
-        disappeared; removed nodes stay visible, struck out, until the highlight fades.</li>
-      <li><b>Follow Git Log</b> &ndash; show the commits selected in the main Git log tab instead of the uncommitted
-        changes, which are shown again while no commit is selected. The tool window title shows the selected commit.</li>
+      <li><b>Modes</b>: <b>Uncommitted</b> changes; <b>Branch vs main</b> &ndash; everything the branch changed since
+        it forked from <code>main</code>/<code>master</code>, like a merge request (needs Git); <b>Follow Git Log</b>
+        &ndash; the commits selected in the Git log.</li>
+      <li><b>Export Diff for Review</b> &ndash; saves the changes to <code>reviews/&lt;timestamp&gt;-changes.diff</code>
+        and copies a review skill command to paste into your AI agent. The directory and the command are set in
+        <b>Settings | Tools | Structure Diff</b>.</li>
+      <li>Toggles: <b>Show Nested Changes</b> (inside functions and object literals), <b>Show Unversioned Files</b> (except files directly in the
+        repository root),
+        <b>Flash Changes</b> (briefly highlight what appeared, changed or disappeared).</li>
+      <li>Per file and member: <b>+</b> added, <b>~</b> modified, <b>&minus;</b> removed counts, changed lines,
+        renames/moves, and old vs new signature in the tooltip. Multiple VCS roots are grouped.</li>
+      <li><b>Double-click</b>/<b>Enter</b> jumps to source, <b>middle-click</b> opens the diff at the member;
+        context menu: Show Diff, Jump to Source, Copy Path.</li>
     </ul>
 
-    <h3>Tree</h3>
+    <h3>Review Findings</h3>
     <ul>
-      <li>A summary line below the toolbar shows the number of changed files, added (<b>+</b>), modified (<b>~</b>)
-        and removed (<b>&minus;</b>) members, and the total number of changed lines.</li>
-      <li><b>File nodes</b> show the file name in its VCS status color, the same member counts
-        (+ added, ~ modified, &minus; removed) and changed line count, and the directory.
-        A renamed or moved file shows its old name or path after <b>&larr;</b>.
-        The tooltip lists lines added and removed and where the file was moved or renamed from.</li>
-      <li><b>Member nodes</b> show the member in its status color; removed members are struck out.
-        The tooltip shows the old and new signature when it changed, and the lines added and removed.</li>
-      <li>An added or removed member with children counts once; a modified container counts only through its
-        changed children.</li>
-      <li>When changes span several VCS roots, files are grouped by root.</li>
-    </ul>
-
-    <h3>Navigation</h3>
-    <ul>
-      <li><b>Double-click</b> or <b>Enter</b> &ndash; jump to the member in the source.</li>
-      <li><b>Middle-click</b> &ndash; open the diff scrolled to that member.</li>
-      <li>Context menu: <b>Show Diff</b>, <b>Jump to Source</b> and <b>Copy Path</b>, with the IDE's shortcuts
-        for Show Diff and Jump to Source.</li>
+      <li>When a <code>reviews/*.sarif</code> file appears, or you open a SARIF file from elsewhere with <b>Open Review</b>, its findings are highlighted in the editor with a gutter
+        icon; the tooltip shows the finding and suggested fix.</li>
+      <li>The <b>Review Findings</b> tool window lists them by file and severity; double-click or Enter jumps to the code. Open an older
+        review, Reload, or Clear All.</li>
+      <li>Findings follow your edits; when the code is gone they are greyed as possibly fixed.</li>
+      <li><b>Dismiss</b>, <b>Restore</b> and <b>Copy</b> findings; dismissed ones stay dismissed in later reviews.</li>
+      <li>The Structure Diff tree marks members and files that have findings (<b>&#9888;N</b>).</li>
     </ul>
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.lang</depends>
     <depends>com.intellij.modules.vcs</depends>
+    <!-- only the Branch vs main mode (BranchChangeSource) needs Git; without it the mode is not offered -->
+    <depends optional="true" config-file="structurediff-git.xml">Git4Idea</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow id="Structure Diff" anchor="left" secondary="true" icon="AllIcons.Actions.Diff"
                     factoryClass="com.fsodomka.structurediff.StructureDiffToolWindowFactory"/>
+        <toolWindow id="Review Findings" anchor="bottom" icon="AllIcons.Actions.Preview"
+                    factoryClass="com.fsodomka.structurediff.review.ReviewFindingsToolWindowFactory"/>
+        <postStartupActivity implementation="com.fsodomka.structurediff.review.ReviewFindingsStartup"/>
+        <applicationService serviceImplementation="com.fsodomka.structurediff.StructureDiffSettings"/>
+        <applicationConfigurable parentId="tools" instance="com.fsodomka.structurediff.StructureDiffConfigurable"
+                                 id="com.fsodomka.structurediff.settings" displayName="Structure Diff"/>
+        <notificationGroup id="Structure Diff" displayType="BALLOON"/>
     </extensions>
+
+    <projectListeners>
+        <listener class="com.fsodomka.structurediff.review.ReviewFilesListener"
+                  topic="com.intellij.openapi.vfs.newvfs.BulkFileListener"/>
+    </projectListeners>
 </idea-plugin>
