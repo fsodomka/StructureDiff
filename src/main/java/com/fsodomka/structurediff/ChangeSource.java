@@ -17,7 +17,7 @@ interface ChangeSource {
 		return List.of();
 	}
 
-	/** Whether {@link #unversioned()} can return files; the "Show Unversioned Files" toggle is crossed out otherwise. */
+	/** Whether {@link #unversioned()} can return files. */
 	default boolean hasUnversioned() {
 		return false;
 	}
@@ -30,4 +30,11 @@ interface ChangeSource {
 	 * when files and members appear because of the loading, not because they changed.
 	 */
 	boolean highlightChanges();
+
+	/**
+	 * Calls {@code onReplace}, besides {@code onChange}, on changes that replace what is shown, so the refresh shows a busy
+	 * spinner, not just the first load; until {@code parent} is disposed.
+	 */
+	default void subscribeReplacing(Runnable onReplace, Disposable parent) {
+	}
 }

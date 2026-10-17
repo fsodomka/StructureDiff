@@ -13,6 +13,7 @@ import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.FileStatus;
@@ -27,22 +28,26 @@ import com.intellij.psi.PsiFileFactory;
 import com.intellij.util.diff.Diff;
 import com.intellij.util.diff.FilesTooBigForDiffException;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.Icon;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.BiFunction;
 
 /**
  * Computes member-level differences by comparing the Structure view trees of the before and after file versions.
  */
-final class StructureDiffComputer {
+public final class StructureDiffComputer {
 	private static final Logger LOG = Logger.getInstance(StructureDiffComputer.class);
 
 	private StructureDiffComputer() {
@@ -90,17 +95,18 @@ final class StructureDiffComputer {
 	/**
 	 * Loads revision contents; may do VCS I/O, so call outside a read action.
 	 * Committed revisions are immutable, so their contents are taken from and added to {@code revisionCache}.
+	 * The line counts of {@code previous}, the last load of the file, are reused when its contents did not change.
 	 */
-	static FileDiff load(Change change, Map<String, String> revisionCache) {
-		return load(change, change.getFileStatus(), revisionCache);
+	static FileDiff load(Change change, Map<String, String> revisionCache, @Nullable FileDiff previous) {
+		return load(change, change.getFileStatus(), revisionCache, previous);
 	}
 
 	/** Unversioned file, shown as added. */
-	static FileDiff loadUnversioned(FilePath path) {
-		return load(new Change(null, CurrentContentRevision.create(path)), FileStatus.ADDED, Map.of());
+	static FileDiff loadUnversioned(FilePath path, @Nullable FileDiff previous) {
+		return load(new Change(null, CurrentContentRevision.create(path)), FileStatus.ADDED, Map.of(), previous);
 	}
 
-	private static FileDiff load(Change change, FileStatus status, Map<String, String> revisionCache) {
+	private static FileDiff load(Change change, FileStatus status, Map<String, String> revisionCache, @Nullable FileDiff previous) {
 		ContentRevision before = change.getBeforeRevision();
 		ContentRevision after = change.getAfterRevision();
 		FilePath path = ChangesUtil.getFilePath(change);
@@ -111,7 +117,9 @@ final class StructureDiffComputer {
 		}
 		String beforeText = cachedContent(before, revisionCache);
 		String afterText = cachedContent(after, revisionCache);
-		int[] lines = changedLines(StringUtil.notNullize(beforeText), StringUtil.notNullize(afterText));
+		int[] lines = previous != null && Objects.equals(previous.beforeText(), beforeText) && Objects.equals(previous.afterText(), afterText)
+				? new int[]{previous.linesAdded(), previous.linesRemoved()}
+				: changedLines(StringUtil.notNullize(beforeText), StringUtil.notNullize(afterText));
 		return new FileDiff(change, path.getPath(), fileType, status, beforeText, afterText, lines[0], lines[1], null);
 	}
 
@@ -195,14 +203,23 @@ final class StructureDiffComputer {
 
 	/** Returns null when the file type has no tree-based structure view. */
 	private static List<Member> structure(Project project, String name, FileType fileType, String text) {
-		PsiFile psi = PsiFileFactory.getInstance(project).createFileFromText(name, fileType, text);
+		return withStructure(project, name, fileType, text, null, StructureDiffComputer::members);
+	}
+
+	/**
+	 * Parses {@code text} and applies {@code function} to the root of its structure view and the parsed file;
+	 * {@code fallback} when the file type has no tree-based structure view.
+	 */
+	private static <T> T withStructure(Project project, String fileName, FileType fileType, CharSequence text, T fallback,
+									   BiFunction<TreeElement, PsiFile, T> function) {
+		PsiFile psi = PsiFileFactory.getInstance(project).createFileFromText(fileName, fileType, text);
 		StructureViewBuilder builder = LanguageStructureViewBuilder.getInstance().getStructureViewBuilder(psi);
 		if (!(builder instanceof TreeBasedStructureViewBuilder treeBuilder)) {
-			return null;
+			return fallback;
 		}
 		StructureViewModel model = treeBuilder.createStructureViewModel(null);
 		try {
-			return members(model.getRoot(), psi);
+			return function.apply(model.getRoot(), psi);
 		}
 		finally {
 			Disposer.dispose(model);
@@ -215,33 +232,107 @@ final class StructureDiffComputer {
 	 */
 	static int currentOffset(Project project, String fileName, FileType fileType, CharSequence text, List<MemberDiff> path) {
 		// parsed like the revisions, not taken from the document: the PSI of an uncommitted document is stale, and committing needs the write-intent lock
-		PsiFile psi = PsiFileFactory.getInstance(project).createFileFromText(fileName, fileType, text);
-		StructureViewBuilder builder = LanguageStructureViewBuilder.getInstance().getStructureViewBuilder(psi);
-		if (!(builder instanceof TreeBasedStructureViewBuilder treeBuilder)) {
-			return -1;
-		}
-		StructureViewModel model = treeBuilder.createStructureViewModel(null);
-		try {
-			TreeElement current = model.getRoot();
-			for (MemberDiff member : path) {
-				Map<String, TreeElement> children = keyedChildren(current, psi);
-				current = children.get(member.key());
-				if (current == null) {
-					String name = name(member.label());
-					current = children.values().stream()
-							.filter(c -> name.equals(name(label(c))))
-							.findFirst().orElse(null);
+		List<Step> steps = path.stream().map(m -> new Step(m.key(), name(m.label()))).toList();
+		return withStructure(project, fileName, fileType, text, -1, (root, psi) -> {
+			PsiElement element = element(find(root, psi, steps));
+			return element == null ? -1 : element.getTextOffset();
+		});
+	}
+
+	/** One step of a path to a member: its key, else the first sibling with the same {@link #name}. */
+	record Step(String key, String name) {
+	}
+
+	/** Text range of a member and its neighbor siblings, null at either end. */
+	record Located(TextRange range, @Nullable Step previous, @Nullable Step next) {
+	}
+
+	/**
+	 * The member at {@code path} in {@code text}, matched like {@link #currentOffset}; null when the file type has no
+	 * tree-based structure view or the member is not there. Call inside a read action.
+	 */
+	static @Nullable Located locate(Project project, String fileName, FileType fileType, CharSequence text, List<Step> path) {
+		return withStructure(project, fileName, fileType, text, null, (root, psi) -> {
+			TreeElement parent = find(root, psi, path.subList(0, path.size() - 1));
+			if (parent == null) {
+				return null;
+			}
+			TreeElement current = find(parent, psi, path.subList(path.size() - 1, path.size()));
+			PsiElement element = element(current);
+			if (element == null) {
+				return null;
+			}
+			Step previous = null;
+			Step next = null;
+			boolean seen = false;
+			for (Map.Entry<String, TreeElement> entry : keyedChildren(parent, psi).entrySet()) {
+				Step step = new Step(entry.getKey(), name(label(entry.getValue())));
+				if (element(entry.getValue()) == element) {
+					seen = true;
 				}
-				if (current == null) {
-					return -1;
+				else if (!seen) {
+					previous = step;
+				}
+				else {
+					next = step;
+					break;
 				}
 			}
-			PsiElement element = element(current);
-			return element == null ? -1 : element.getTextOffset();
+			return new Located(element.getTextRange(), previous, next);
+		});
+	}
+
+	/** The member at {@code path} below {@code root}; null when {@code root} is null or the member is not there. */
+	private static @Nullable TreeElement find(@Nullable TreeElement root, PsiFile psi, List<Step> path) {
+		TreeElement current = root;
+		for (Step step : path) {
+			if (current == null) {
+				return null;
+			}
+			Map<String, TreeElement> children = keyedChildren(current, psi);
+			current = children.get(step.key());
+			if (current == null) {
+				current = children.values().stream()
+						.filter(c -> step.name().equals(name(label(c))))
+						.findFirst().orElse(null);
+			}
 		}
-		finally {
-			Disposer.dispose(model);
+		return current;
+	}
+
+	/**
+	 * For each offset in {@code text}, the keys of the members enclosing it, outermost first, as {@link #diff} keys them;
+	 * empty for an offset outside any member, or for all offsets when the file type has no tree-based structure view.
+	 * Call inside a read action.
+	 */
+	public static List<List<String>> memberKeyPaths(Project project, String fileName, FileType fileType, CharSequence text,
+													int[] offsets) {
+		List<List<String>> none = Collections.nCopies(offsets.length, List.of());
+		if (text.length() > MAX_STRUCTURE_LENGTH) {
+			return none;
 		}
+		return withStructure(project, fileName, fileType, text, none, (root, psi) -> {
+			List<List<String>> result = new ArrayList<>(offsets.length);
+			for (int offset : offsets) {
+				List<String> path = new ArrayList<>();
+				TreeElement current = root;
+				while (current != null) {
+					TreeElement enclosing = null;
+					for (Map.Entry<String, TreeElement> entry : keyedChildren(current, psi).entrySet()) {
+						PsiElement element = element(entry.getValue());
+						if (element != null && element.getTextRange().getStartOffset() <= offset
+								&& offset < element.getTextRange().getEndOffset()) {
+							path.add(entry.getKey());
+							enclosing = entry.getValue();
+							break;
+						}
+					}
+					current = enclosing;
+				}
+				result.add(path);
+			}
+			return result;
+		});
 	}
 
 	/** Children of {@code parent} declared in {@code file} by key: the label, with {@code #n} for the n-th same label. */
@@ -277,7 +368,7 @@ final class StructureDiffComputer {
 			TreeElement child = entry.getValue();
 			PsiElement element = element(child);
 			ItemPresentation presentation = child.getPresentation();
-			String label = StringUtil.notNullize(presentation.getPresentableText());
+			String label = label(child);
 			String elementText = element == null ? null : element.getText();
 			String text = elementText == null ? label : elementText;
 			int offset = element == null ? -1 : element.getTextOffset();
@@ -386,7 +477,7 @@ final class StructureDiffComputer {
 	}
 
 	/** Label without parameters and type: {@code foo(a: string): void} -> {@code foo}, {@code count: int} -> {@code count}. */
-	private static String name(String label) {
+	static String name(String label) {
 		int end = StringUtil.indexOfAny(label, "(:");
 		return end < 0 ? label : label.substring(0, end).trim();
 	}

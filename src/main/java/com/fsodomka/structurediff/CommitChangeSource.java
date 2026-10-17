@@ -107,6 +107,12 @@ final class CommitChangeSource implements ChangeSource, Disposable {
 		return false;
 	}
 
+	/** Another commit was selected. */
+	@Override
+	public void subscribeReplacing(Runnable onReplace, Disposable parent) {
+		subscribe(onReplace, parent);
+	}
+
 	private void attach() {
 		MainVcsLogUi ui = project.isDisposed() ? null : mainLogUi(VcsProjectLog.getInstance(project));
 		if (ui == attachedUi) {
@@ -185,7 +191,8 @@ final class CommitChangeSource implements ChangeSource, Disposable {
 		pendingIds = null;
 		// a merge commit lists a file once per parent; keep the first
 		Map<String, Change> byPath = new LinkedHashMap<>();
-		if (attachedTree != null) {
+		// the browser can keep the changes of a cleared selection
+		if (attachedTree != null && !ids.isEmpty()) {
 			for (Change change : VcsTreeModelData.all(attachedTree).userObjects(Change.class)) {
 				byPath.putIfAbsent(ChangesUtil.getFilePath(change).getPath(), change);
 			}
@@ -196,7 +203,7 @@ final class CommitChangeSource implements ChangeSource, Disposable {
 			return;
 		}
 		commitIds = ids;
-		firstCommit = ids.isEmpty() ? null : selection.getCommits().get(0);
+		firstCommit = ids.isEmpty() ? null : selection.getCommits().getFirst();
 		changes = newChanges;
 		listeners.forEach(Runnable::run);
 	}
