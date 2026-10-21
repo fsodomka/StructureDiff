@@ -121,10 +121,8 @@ final class ReviewHighlighter {
 	void remove(Finding finding) {
 		Placement placement = placements.remove(finding);
 		if (placement != null && placement.highlighter() != null) {
-			RangeHighlighter highlighter = placement.highlighter();
-			if (highlighter.isValid()) {
-				DocumentMarkupModel.forDocument(highlighter.getDocument(), project, true).removeHighlighter(highlighter);
-			}
+			// not via DocumentMarkupModel.forDocument: once the project is disposing it returns an empty model that throws
+			placement.highlighter().dispose();
 		}
 	}
 

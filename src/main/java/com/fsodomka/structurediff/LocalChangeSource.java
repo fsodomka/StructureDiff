@@ -31,7 +31,10 @@ final class LocalChangeSource implements ChangeSource {
 		return ChangeListManager.getInstance(project).getAllChanges();
 	}
 
-	/** Unversioned project files, except those directly in a content root, which skips scratch files like out.json in the project root. */
+	/**
+	 * Unversioned files, except excluded ones and those directly in a content root, which skips scratch files like out.json
+	 * in the project root. Files outside the content, e.g. in a repository mapped only as a VCS root, are kept.
+	 */
 	@Override
 	public List<FilePath> unversioned() {
 		ChangeListManager changeListManager = ChangeListManager.getInstance(project);
@@ -39,7 +42,7 @@ final class LocalChangeSource implements ChangeSource {
 		return ApplicationManager.getApplication().runReadAction((Computable<List<FilePath>>) () -> changeListManager.getUnversionedFilesPaths().stream()
 				.filter(path -> {
 					VirtualFile file = path.getVirtualFile();
-					return file != null && fileIndex.isInContent(file)
+					return file != null && !fileIndex.isExcluded(file)
 							&& !Objects.equals(file.getParent(), fileIndex.getContentRootForFile(file));
 				})
 				.toList());
