@@ -8,16 +8,35 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 
 import javax.swing.tree.DefaultMutableTreeNode;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public class StructureDiffPanelTest extends BasePlatformTestCase {
+	private static MemberDiff member(String key, FileStatus status, long changeId) {
+		return new MemberDiff(key, key, key, null, status, 0, 0, 1, 1, true, changeId, List.of());
+	}
+
+	private static MemberDiff member(String key, long changeId) {
+		return member(key, FileStatus.MODIFIED, changeId);
+	}
+
 	private static MemberDiff member(String key) {
-		return new MemberDiff(key, key, key, null, FileStatus.MODIFIED, 0, 0, 1, 1, true, List.of());
+		return member(key, 0);
 	}
 
 	private static FileDiff file(String path) {
-		return new FileDiff(null, path, null, FileStatus.MODIFIED, "", "", 1, 1, List.of());
+		return file(path, FileStatus.MODIFIED);
+	}
+
+	private static FileDiff file(String path, FileStatus status) {
+		return file(path, status, "", "");
+	}
+
+	private static FileDiff file(String path, FileStatus status, String beforeText, String afterText) {
+		return new FileDiff(null, path, null, status, beforeText, afterText, 1, 1, List.of());
 	}
 
 	private static MemberFinding finding(String title, String... keyPath) {
@@ -32,6 +51,12 @@ public class StructureDiffPanelTest extends BasePlatformTestCase {
 		DefaultMutableTreeNode node = new DefaultMutableTreeNode(userObject);
 		parent.add(node);
 		return node;
+	}
+
+	private static Map<List<String>, DefaultMutableTreeNode> nodes(DefaultMutableTreeNode root) {
+		Map<List<String>, DefaultMutableTreeNode> nodes = new HashMap<>();
+		StructureDiffPanel.collectNodes(root, new ArrayList<>(), nodes);
+		return nodes;
 	}
 
 	private static List<String> titles(List<MemberFinding> findings) {
@@ -128,5 +153,74 @@ public class StructureDiffPanelTest extends BasePlatformTestCase {
 		assertSame(groupedMember, StructureDiffPanel.find(grouped, key));
 		assertSame(flatMember, StructureDiffPanel.find(flat, key));
 		assertSame(repoNode, StructureDiffPanel.find(grouped, StructureDiffPanel.keyOf(repoNode)));
+	}
+
+	/** A member modified again keeps its status; its new change id still makes it flash. */
+	public void testModifiedMemberFlashesAgainWhenItsContentChanged() {
+		assertTrue(StructureDiffPanel.changedSince(member("m", 1), member("m", 2)));
+		assertFalse(StructureDiffPanel.changedSince(member("m", 2), member("m", 2)));
+	}
+
+	public void testFlashesWhenTheStatusChanges() {
+		MemberDiff added = member("m", FileStatus.ADDED, 1);
+
+		assertTrue(StructureDiffPanel.changedSince(member("m", 1), added));
+		assertTrue(StructureDiffPanel.changedSince(added, member("m", 1)));
+	}
+
+	/** A file that stays modified is not a change: every member edit would also flash the file. */
+	public void testModifiedFileDoesNotFlashWhenOnlyItsContentChanged() {
+		FileDiff before = file("/p/a.java", FileStatus.MODIFIED, "void a() {}", "void a() { int x = 1; }");
+		FileDiff after = file("/p/a.java", FileStatus.MODIFIED, "void a() {}", "void a() { int x = 2; }");
+
+		assertFalse(StructureDiffPanel.changedSince(before, after));
+		assertTrue(StructureDiffPanel.changedSince(file("/p/a.java", FileStatus.ADDED), file("/p/a.java")));
+	}
+
+	/** Each node flashes on its own: a running flash suppresses its node only, other changed nodes still flash. */
+	public void testRunningFlashSuppressesItsNodeOnly() {
+		DefaultMutableTreeNode oldRoot = new DefaultMutableTreeNode();
+		DefaultMutableTreeNode oldFile = add(oldRoot, file("/p/a.java"));
+		DefaultMutableTreeNode oldA = add(oldFile, member("a", 1));
+		DefaultMutableTreeNode oldB = add(oldFile, member("b", 1));
+		DefaultMutableTreeNode newRoot = new DefaultMutableTreeNode();
+		DefaultMutableTreeNode newFile = add(newRoot, file("/p/a.java"));
+		add(newFile, member("a", 2));
+		add(newFile, member("b", 2));
+		List<String> a = StructureDiffPanel.keyOf(oldA);
+		List<String> b = StructureDiffPanel.keyOf(oldB);
+
+		assertEquals(Set.of(b), StructureDiffPanel.newFlashes(nodes(oldRoot), nodes(newRoot), Set.of(a), 0).keySet());
+		assertEquals(Set.of(a, b), StructureDiffPanel.newFlashes(nodes(oldRoot), nodes(newRoot), Set.of(), 0).keySet());
+	}
+
+	/** A status change updates a running flash instead of being skipped with the other content changes. */
+	public void testStatusChangeFlashesWhileItsNodeIsRunning() {
+		DefaultMutableTreeNode oldRoot = new DefaultMutableTreeNode();
+		DefaultMutableTreeNode oldA = add(add(oldRoot, file("/p/a.java")), member("a", FileStatus.ADDED, 1));
+		DefaultMutableTreeNode newRoot = new DefaultMutableTreeNode();
+		add(add(newRoot, file("/p/a.java")), member("a", FileStatus.MODIFIED, 1));
+		List<String> a = StructureDiffPanel.keyOf(oldA);
+
+		Map<List<String>, StructureDiffPanel.Flash> flashes =
+				StructureDiffPanel.newFlashes(nodes(oldRoot), nodes(newRoot), Set.of(a), 0);
+
+		assertEquals(Set.of(a), flashes.keySet());
+		assertEquals(FileStatus.MODIFIED, flashes.get(a).status());
+	}
+
+	/** A removal flashes as a ghost even while the removed node's own flash runs. */
+	public void testRemovalFlashesWhileItsNodeIsRunning() {
+		DefaultMutableTreeNode oldRoot = new DefaultMutableTreeNode();
+		DefaultMutableTreeNode oldA = add(add(oldRoot, file("/p/a.java")), member("a", 1));
+		DefaultMutableTreeNode newRoot = new DefaultMutableTreeNode();
+		add(newRoot, file("/p/a.java"));
+		List<String> a = StructureDiffPanel.keyOf(oldA);
+
+		Map<List<String>, StructureDiffPanel.Flash> flashes =
+				StructureDiffPanel.newFlashes(nodes(oldRoot), nodes(newRoot), Set.of(a), 0);
+
+		assertEquals(Set.of(a), flashes.keySet());
+		assertSame(oldA.getUserObject(), flashes.get(a).vanished());
 	}
 }
