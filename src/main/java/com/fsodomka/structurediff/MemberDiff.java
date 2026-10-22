@@ -12,12 +12,15 @@ import java.util.List;
  * {@code beforeLabel} differs from {@code label} when the signature changed.
  * {@code linesAdded}/{@code linesRemoved} count the changed lines of the member, all its lines when added or removed.
  * {@code container} is false for code members (methods, functions, variables) whose nested changes can be hidden.
+ * {@code changeId} identifies the member's content, including the content of its children; unlike the offsets it does not
+ * change when edits elsewhere in the file move the member, and it changes when a modified member is modified again.
  */
 public record MemberDiff(String key, String label, String beforeLabel, Icon icon, FileStatus status, int beforeOffset,
-						 int afterOffset, int linesAdded, int linesRemoved, boolean container, List<MemberDiff> children) {
+						 int afterOffset, int linesAdded, int linesRemoved, boolean container, long changeId,
+						 List<MemberDiff> children) {
 
 	MemberDiff withChildren(List<MemberDiff> newChildren) {
 		return new MemberDiff(key, label, beforeLabel, icon, status, beforeOffset, afterOffset, linesAdded, linesRemoved, container,
-				newChildren);
+				changeId, newChildren);
 	}
 }

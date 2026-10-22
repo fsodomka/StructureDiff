@@ -102,8 +102,10 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private final Alarm alarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, this);
 	private static final long FLASH_MILLIS = 4000;
 	/**
-	 * Recent changes by node key. Nodes that appeared or changed status get a background that fades out;
-	 * nodes that disappeared stay in the tree as {@link Ghost}s until their flash ends.
+	 * Recent changes by node key. Nodes that appeared or changed get a background that fades out;
+	 * nodes that disappeared stay in the tree as {@link Ghost}s until their flash ends. Each node has its own flash:
+	 * content changes to a flashing node do not restart it, while other nodes flash independently; a status change or
+	 * removal always flashes.
 	 */
 	private final Map<List<String>, Flash> flashes = new HashMap<>();
 	/** Whether a refresh result with {@link ChangeSource#highlightChanges()} was shown; it is the initial state, not changes to flash, even if a later one starts from an empty tree. */
@@ -254,7 +256,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 
 		});
 		group.add(new EdtToggleAction("Flash Changes",
-				"Briefly highlight members and files that appeared, changed status or disappeared", AllIcons.Actions.Highlighting) {
+				"Briefly highlight members and files that appeared, changed or disappeared", AllIcons.Actions.Highlighting) {
 			@Override
 			public boolean isSelected(@NotNull AnActionEvent e) {
 				return source.hasUnversioned() && flashChanges;
@@ -507,9 +509,10 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 
 	/**
 	 * A recent change of the node at a key. {@code vanished} is the user object of a node that disappeared,
-	 * shown at {@code index} of its parent until the flash ends; null for a node that appeared or changed status.
+	 * shown at {@code index} of its parent until the flash ends; null for a node that appeared or changed.
+	 * Package-private for the test of {@link #newFlashes}.
 	 */
-	private record Flash(FileStatus status, Object vanished, int index, long start) {
+	record Flash(FileStatus status, Object vanished, int index, long start) {
 		/** 1 for the first half of the flash, then fading to 0. */
 		double strength(long now) {
 			double remaining = 1 - (double) (now - start) / FLASH_MILLIS;
@@ -540,7 +543,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		}
 	}
 
-	/** @param highlightChanges flashes nodes that appeared, changed status or disappeared since the previous tree */
+	/** @param highlightChanges flashes nodes that appeared, changed or disappeared since the previous tree */
 	private void show(List<FileDiff> loadedFiles, boolean highlightChanges) {
 		List<FileDiff> allFiles = shownFiles(loadedFiles);
 		DefaultMutableTreeNode oldRoot = (DefaultMutableTreeNode) tree.getModel().getRoot();
@@ -582,12 +585,14 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		Map<List<String>, DefaultMutableTreeNode> newNodes = new HashMap<>();
 		collectNodes(root, new ArrayList<>(), newNodes);
 		long now = System.currentTimeMillis();
+		// a flash that ended is dropped before new ones start, so its node can flash again
+		flashes.entrySet().removeIf(e -> e.getValue().expired(now) || e.getValue().vanished() != null && newNodes.containsKey(e.getKey()));
+		Map<List<String>, Flash> started = Map.of();
 		if (highlightChanges && baselineShown && flashChanges) {
-			addFlashes(oldNodes, newNodes, now);
+			started = newFlashes(oldNodes, newNodes, flashes.keySet(), now);
+			flashes.putAll(started);
 		}
 		baselineShown |= highlightChanges;
-		flashes.entrySet().removeIf(e -> e.getValue().expired(now) || e.getValue().vanished() != null && newNodes.containsKey(e.getKey()));
-		List<List<String>> newFlashes = flashes.entrySet().stream().filter(e -> e.getValue().start() == now).map(Map.Entry::getKey).toList();
 		insertGhosts(root, newNodes, repoNodes);
 		((DefaultTreeModel) tree.getModel()).setRoot(root);
 		Trees.expandAll(tree);
@@ -606,8 +611,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				tree.setSelectionPath(new TreePath(node.getPath()));
 			}
 		}
-		if (!newFlashes.isEmpty()) {
-			revealFlash(tree, newFlashes.stream().map(key -> find(root, key)).filter(Objects::nonNull)
+		if (!started.isEmpty()) {
+			revealFlash(tree, started.keySet().stream().map(key -> find(root, key)).filter(Objects::nonNull)
 					.map(node -> new TreePath(node.getPath())).toList());
 		}
 
@@ -911,6 +916,18 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		return userObject instanceof MemberDiff member ? member.status() : null;
 	}
 
+	/**
+	 * Whether the node whose user object is {@code after} changed since the same key held {@code before}: its status
+	 * changed, or it is a member modified again, which keeps its status but gets a new {@link MemberDiff#changeId()}.
+	 * A file that stays modified is not a change: every member edit would also flash the file.
+	 */
+	static boolean changedSince(Object before, Object after) {
+		if (statusOf(before) != statusOf(after)) {
+			return true;
+		}
+		return before instanceof MemberDiff was && after instanceof MemberDiff now && was.changeId() != now.changeId();
+	}
+
 	/** Collects nodes by key, without ghosts; the key of the invisible root is [""]. */
 	static void collectNodes(DefaultMutableTreeNode node, List<String> key, Map<List<String>, DefaultMutableTreeNode> nodes) {
 		List<String> nodeKey = key.isEmpty() ? List.of("") : key;
@@ -927,14 +944,23 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		}
 	}
 
-	private void addFlashes(Map<List<String>, DefaultMutableTreeNode> oldNodes, Map<List<String>, DefaultMutableTreeNode> newNodes,
-							long now) {
+	/**
+	 * The flashes for the nodes that appeared, changed or disappeared since {@code oldNodes}. A content change to a
+	 * node whose key is in {@code running} is skipped, so its flash is not restarted while it runs, while other nodes
+	 * flash independently; a status change replaces the running flash to show the new status. A removal always flashes
+	 * as a {@link Ghost}, even while the removed node's own flash runs.
+	 */
+	static Map<List<String>, Flash> newFlashes(Map<List<String>, DefaultMutableTreeNode> oldNodes,
+											   Map<List<String>, DefaultMutableTreeNode> newNodes, Set<List<String>> running, long now) {
+		Map<List<String>, Flash> result = new LinkedHashMap<>();
 		newNodes.forEach((key, node) -> {
 			FileStatus status = statusOf(node.getUserObject());
 			DefaultMutableTreeNode old = oldNodes.get(key);
-			if (status != null && (old == null || status != statusOf(old.getUserObject()))
+			boolean statusChanged = old != null && status != statusOf(old.getUserObject());
+			if (status != null && (statusChanged || !running.contains(key))
+					&& (old == null || changedSince(old.getUserObject(), node.getUserObject()))
 					&& (node.getUserObject() instanceof FileDiff || hadMembers(node, oldNodes))) {
-				flashes.put(key, new Flash(status, null, -1, now));
+				result.put(key, new Flash(status, null, -1, now));
 			}
 		});
 		oldNodes.forEach((key, node) -> {
@@ -943,9 +969,10 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			boolean parentRemains = key.size() == 2 || newNodes.containsKey(key.subList(0, key.size() - 1));
 			if (status != null && !newNodes.containsKey(key) && parentRemains
 					&& (node.getUserObject() instanceof FileDiff || hadMembers(node, newNodes))) {
-				flashes.put(key, new Flash(status, node.getUserObject(), node.getParent().getIndex(node), now));
+				result.put(key, new Flash(status, node.getUserObject(), node.getParent().getIndex(node), now));
 			}
 		});
+		return result;
 	}
 
 	/**

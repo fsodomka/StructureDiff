@@ -76,6 +76,9 @@ public final class StructureDiffComputer {
 	};
 	/** Larger files are listed without members; parsing them would stall the refresh. */
 	private static final int MAX_STRUCTURE_LENGTH = 1_000_000;
+	/** FNV-1a constants of the content ids, see {@link #contentId}. */
+	private static final long FNV_OFFSET = 0xcbf29ce484222325L;
+	private static final long FNV_PRIME = 0x100000001b3L;
 
 	private static boolean isLeafType(Class<?> type) {
 		if (type == null) {
@@ -452,7 +455,7 @@ public final class StructureDiffComputer {
 			if (!children.isEmpty() || !a.normalizedText().equals(b.normalizedText()) || !a.label().equals(b.label())) {
 				int[] lines = changedLines(b.text(), a.text());
 				result.add(new MemberDiff(a.key(), a.label(), b.label(), a.icon(), FileStatus.MODIFIED, b.offset(), a.offset(),
-						lines[0], lines[1], a.container(), children));
+						lines[0], lines[1], a.container(), contentId(a), children));
 			}
 		}
 		for (Member b : beforeByKey.values()) {
@@ -487,6 +490,34 @@ public final class StructureDiffComputer {
 		boolean added = status == FileStatus.ADDED;
 		int lines = StringUtil.countNewLines(m.text()) + 1;
 		return new MemberDiff(m.key(), m.label(), m.label(), m.icon(), status, added ? -1 : m.offset(), added ? m.offset() : -1,
-				added ? lines : 0, added ? 0 : lines, m.container(), children);
+				added ? lines : 0, added ? 0 : lines, m.container(), contentId(m), children);
+	}
+
+	/**
+	 * Identifies the content of {@code member} and of its children, so a member modified again can be told from an
+	 * unchanged one although its status stays {@link FileStatus#MODIFIED}. Whitespace-only differences are ignored, as
+	 * by the change detection; child content is included, as a container's text only holds its children's keys.
+	 */
+	private static long contentId(Member member) {
+		long id = stringHash(member.normalizedText());
+		for (Member child : member.children()) {
+			id = mix(id, contentId(child));
+		}
+		return id;
+	}
+
+	/** FNV-1a over the text's chars; an id is only compared for equality, so its distribution matters, not its value. */
+	private static long stringHash(String text) {
+		long hash = FNV_OFFSET;
+		for (int i = 0; i < text.length(); i++) {
+			hash = (hash ^ text.charAt(i)) * FNV_PRIME;
+		}
+		return hash;
+	}
+
+	/** Combines the id of a child with the id of the member so far; the children's order is part of the content. */
+	private static long mix(long hash, long child) {
+		long result = (hash ^ child) * FNV_PRIME;
+		return result ^ (result >>> 29);
 	}
 }
