@@ -34,6 +34,15 @@ final class DiffExporter {
 	 * are unversioned changes, and each review would include them. Loads revision contents, so call on a pooled thread.
 	 */
 	static Path export(Project project, Path root, String reviewsDir, Collection<Change> changes, LocalDateTime now) throws VcsException, IOException {
+		return export(project, root, reviewsDir, changes, now, "");
+	}
+
+	/**
+	 * Like {@link #export(Project, Path, String, Collection, LocalDateTime)}, but {@code label} goes into the file name
+	 * before {@code -changes}: exporting several repositories at once gets a differently named diff for each.
+	 */
+	static Path export(Project project, Path root, String reviewsDir, Collection<Change> changes, LocalDateTime now, String label)
+			throws VcsException, IOException {
 		Path dir = root.resolve(reviewsDir);
 		List<Change> reviewed = changes.stream().filter(change -> !Path.of(ChangesUtil.getFilePath(change).getPath()).startsWith(dir)).toList();
 		List<FilePatch> patches = IdeaTextPatchBuilder.buildPatch(project, reviewed, root, false);
@@ -43,7 +52,7 @@ final class DiffExporter {
 			Files.createDirectories(dir);
 			Files.writeString(gitignore, "*\n", StandardCharsets.UTF_8);
 		}
-		String name = TIMESTAMP.format(now) + "-changes";
+		String name = TIMESTAMP.format(now) + (label.isEmpty() ? "" : "-" + label) + "-changes";
 		Path file;
 		// written next to the target and moved, so a failed export leaves no partial diff behind
 		Path temp = Files.createTempFile(dir, "changes", ".tmp");
