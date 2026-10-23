@@ -109,28 +109,37 @@ public class StructureDiffPanelTest extends BasePlatformTestCase {
 		assertEquals(List.of(), StructureDiffPanel.findingsOf(new DefaultMutableTreeNode(file("/p/a.xml")), Map.of()));
 	}
 
-	public void testExportRoot() throws IOException {
+	public void testExportRoots() throws IOException {
 		VirtualFile root1 = myFixture.getTempDirFixture().findOrCreateDir("r1");
 		VirtualFile root2 = myFixture.getTempDirFixture().findOrCreateDir("r2");
+		VirtualFile root3 = myFixture.getTempDirFixture().findOrCreateDir("r3");
 		FileDiff a = file("/r1/a.xml");
 		FileDiff b = file("/r2/b.xml");
-		FileDiff unversioned = file("/elsewhere/c.xml");
-		Map<String, VirtualFile> vcsRoots = Map.of(a.path(), root1, b.path(), root2);
+		FileDiff c = file("/r3/c.xml");
+		FileDiff unversioned = file("/elsewhere/d.xml");
+		Map<String, VirtualFile> vcsRoots = Map.of(a.path(), root1, b.path(), root2, c.path(), root3);
 
-		assertNull(StructureDiffPanel.exportRoot(List.of(), vcsRoots, null));
-		assertNull(StructureDiffPanel.exportRoot(List.of(unversioned), vcsRoots, null));
+		assertEquals(List.of(), StructureDiffPanel.exportRoots(List.of(), vcsRoots, List.of()));
+		assertEquals(List.of(), StructureDiffPanel.exportRoots(List.of(unversioned), vcsRoots, List.of()));
 		// a single root needs no selection
-		assertEquals(root1, StructureDiffPanel.exportRoot(List.of(a, unversioned), vcsRoots, null));
+		assertEquals(List.of(root1), StructureDiffPanel.exportRoots(List.of(a, unversioned), vcsRoots, List.of()));
 
-		// several roots: the root of the selection
-		List<FileDiff> both = List.of(a, b);
-		assertNull(StructureDiffPanel.exportRoot(both, vcsRoots, null));
-		assertEquals(root2, StructureDiffPanel.exportRoot(both, vcsRoots,
-				new DefaultMutableTreeNode(new StructureDiffPanel.RepoNode(root2))));
-		DefaultMutableTreeNode fileNode = new DefaultMutableTreeNode(a);
+		// several roots: all of them when nothing with a root is selected
+		List<FileDiff> all = List.of(a, b, c);
+		assertEquals(List.of(root1, root2, root3), StructureDiffPanel.exportRoots(all, vcsRoots, List.of()));
+		assertEquals(List.of(root1, root2, root3),
+				StructureDiffPanel.exportRoots(all, vcsRoots, List.of(new DefaultMutableTreeNode(unversioned))));
+		// the selected repositories, in tree order, and only those
+		assertEquals(List.of(root2, root3), StructureDiffPanel.exportRoots(all, vcsRoots, List.of(
+				new DefaultMutableTreeNode(new StructureDiffPanel.RepoNode(root2)),
+				new DefaultMutableTreeNode(new StructureDiffPanel.RepoNode(root3)))));
+		// a file or member selects its own repository
+		DefaultMutableTreeNode fileNode = new DefaultMutableTreeNode(b);
 		DefaultMutableTreeNode memberNode = add(fileNode, member("root"));
-		assertEquals(root1, StructureDiffPanel.exportRoot(both, vcsRoots, memberNode));
-		assertNull(StructureDiffPanel.exportRoot(both, vcsRoots, new DefaultMutableTreeNode(unversioned)));
+		assertEquals(List.of(root2), StructureDiffPanel.exportRoots(all, vcsRoots, List.of(memberNode)));
+		// several files of one repository are still one diff
+		assertEquals(List.of(root2), StructureDiffPanel.exportRoots(all, vcsRoots, List.of(
+				fileNode, new DefaultMutableTreeNode(b))));
 	}
 
 	/** Keys of files and members, for flashes and the selection, stay the same when grouping by repository starts or stops. */

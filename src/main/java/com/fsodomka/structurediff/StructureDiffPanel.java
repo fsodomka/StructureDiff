@@ -205,11 +205,11 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 
 			@Override
 			public void update(@NotNull AnActionEvent e) {
-				boolean enabled = exportRoot() != null;
+				boolean enabled = !exportRoots().isEmpty();
 				e.getPresentation().setEnabled(enabled);
-				if (!enabled && !shownFiles(files).isEmpty()) {
-					e.getPresentation().setDescription("Select a file in the repository to export");
-				}
+				e.getPresentation().setDescription(enabled || shownFiles(files).isEmpty()
+						? "Save the shown changes to the reviews directory and copy the review skill command"
+						: "No repository root to export to");
 			}
 
 			@Override
@@ -551,8 +551,14 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		Set<List<String>> collapsed = Trees.collapsed(tree, oldRoot, StructureDiffPanel::keyPart, StructureDiffPanel::isFile);
 		Map<List<String>, DefaultMutableTreeNode> oldNodes = new LinkedHashMap<>();
 		collectNodes(oldRoot, new ArrayList<>(), oldNodes);
-		DefaultMutableTreeNode selected = selectedNode();
-		List<String> selectedKey = selected == null ? null : keyOf(selected);
+		DefaultMutableTreeNode lead = selectedNode();
+		// after a refresh the whole selection comes back, the lead last, so Show Diff and Export still use the lead
+		List<List<String>> selectedKeys = new ArrayList<>(selectedNodes().stream().map(StructureDiffPanel::keyOf).toList());
+		if (lead != null) {
+			List<String> leadKey = keyOf(lead);
+			selectedKeys.remove(leadKey);
+			selectedKeys.add(leadKey);
+		}
 
 		DefaultMutableTreeNode root = new DefaultMutableTreeNode();
 		boolean groupByRoot = allFiles.stream().map(f -> vcsRoots.get(f.path())).filter(Objects::nonNull).distinct().count() > 1;
@@ -605,10 +611,11 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		else if (!fadeTimer.isRunning()) {
 			fadeTimer.start();
 		}
-		if (selectedKey != null) {
-			DefaultMutableTreeNode node = find(root, selectedKey);
-			if (node != null) {
-				tree.setSelectionPath(new TreePath(node.getPath()));
+		if (!selectedKeys.isEmpty()) {
+			List<TreePath> selectedPaths = selectedKeys.stream().map(key -> find(root, key)).filter(Objects::nonNull)
+					.map(node -> new TreePath(node.getPath())).toList();
+			if (!selectedPaths.isEmpty()) {
+				tree.setSelectionPaths(selectedPaths.toArray(TreePath[]::new));
 			}
 		}
 		if (!started.isEmpty()) {
@@ -654,40 +661,97 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		return showUnversioned ? loadedFiles : loadedFiles.stream().filter(f -> !unversionedPaths.contains(f.path())).toList();
 	}
 
-	/** Root to export: the only VCS root of the shown files, else the root of the selected node; null when there is none. */
-	private VirtualFile exportRoot() {
-		return exportRoot(shownFiles(files), vcsRoots, selectedNode());
+	/** Roots to export: the roots of the selection, else the roots of all shown files; empty when none is in a repository. */
+	private List<VirtualFile> exportRoots() {
+		return exportRoots(shownFiles(files), vcsRoots, selectedNodes());
 	}
 
-	static VirtualFile exportRoot(List<FileDiff> shownFiles, Map<String, VirtualFile> vcsRoots, DefaultMutableTreeNode selected) {
-		Set<VirtualFile> roots = shownFiles.stream().map(f -> vcsRoots.get(f.path())).filter(Objects::nonNull).collect(Collectors.toSet());
+	/**
+	 * The roots of the selected repositories and files, else every root of {@code shownFiles}, in their order; empty
+	 * when no shown file is in a repository. A selection of files or repositories restricts the export to those roots.
+	 */
+	static List<VirtualFile> exportRoots(List<FileDiff> shownFiles, Map<String, VirtualFile> vcsRoots,
+			List<DefaultMutableTreeNode> selected) {
+		List<VirtualFile> roots = shownFiles.stream().map(f -> vcsRoots.get(f.path())).filter(Objects::nonNull)
+				.distinct().toList();
 		if (roots.size() <= 1) {
-			return roots.isEmpty() ? null : roots.iterator().next();
+			return roots;
 		}
-		if (selected != null && selected.getUserObject() instanceof RepoNode(VirtualFile root)) {
-			return root;
+		Set<VirtualFile> selectedRoots = new HashSet<>();
+		for (DefaultMutableTreeNode node : selected) {
+			if (node.getUserObject() instanceof RepoNode(VirtualFile root)) {
+				selectedRoots.add(root);
+			}
+			else {
+				FileDiff file = fileOf(node);
+				VirtualFile root = file == null ? null : vcsRoots.get(file.path());
+				if (root != null) {
+					selectedRoots.add(root);
+				}
+			}
 		}
-		FileDiff file = fileOf(selected);
-		return file == null ? null : vcsRoots.get(file.path());
+		return selectedRoots.isEmpty() ? roots : roots.stream().filter(selectedRoots::contains).toList();
 	}
 
-	/** Writes the shown changes of {@link #exportRoot()} to its reviews directory and copies the review command if enabled. */
+	/** Name of {@code root} for a diff of its own, safe for a file name and unique among {@code used}. */
+	private static String repoLabel(VirtualFile root, Set<String> used) {
+		String base = root.getName().replaceAll("[^A-Za-z0-9._-]+", "-");
+		if (base.isEmpty() || base.equals(".") || base.equals("..")) {
+			base = "repo";
+		}
+		String label = base;
+		for (int i = 2; !used.add(label); i++) {
+			label = base + "-" + i;
+		}
+		return label;
+	}
+
+	/** {@code exported} relative to the project base directory when it is below it, else absolute, with {@code /} separators. */
+	private String commandPath(Path exported) {
+		Path file = exported.toAbsolutePath().normalize();
+		String base = project.getBasePath();
+		if (base != null) {
+			Path basePath = Path.of(base).toAbsolutePath().normalize();
+			if (file.startsWith(basePath)) {
+				return basePath.relativize(file).toString().replace('\\', '/');
+			}
+		}
+		return file.toString().replace('\\', '/');
+	}
+
+	/**
+	 * Writes the shown changes of {@link #exportRoots()} to their reviews directories and copies the review command if
+	 * enabled: the selected repository only, or a diff for each of several repositories when none is selected.
+	 */
 	private void exportDiff() {
-		VirtualFile root = exportRoot();
-		if (root == null) {
+		List<VirtualFile> roots = exportRoots();
+		if (roots.isEmpty()) {
 			return;
 		}
-		List<Change> changes = shownFiles(files).stream().filter(f -> root.equals(vcsRoots.get(f.path()))).map(FileDiff::change).toList();
+		List<FileDiff> shown = shownFiles(files);
+		Map<VirtualFile, List<Change>> changes = new LinkedHashMap<>();
+		Map<VirtualFile, String> labels = new LinkedHashMap<>();
+		Set<String> usedLabels = new HashSet<>();
+		for (VirtualFile root : roots) {
+			changes.put(root, shown.stream().filter(f -> root.equals(vcsRoots.get(f.path()))).map(FileDiff::change).toList());
+			// a diff per repository needs a name of its own; one selected repository keeps the plain name
+			labels.put(root, roots.size() == 1 ? "" : repoLabel(root, usedLabels));
+		}
 		StructureDiffSettings settings = StructureDiffSettings.getInstance();
 		String reviewsDir = settings.reviewsDir();
-		new Task.Backgroundable(project, "Exporting diff for review", false) {
-			private Path exported;
+		LocalDateTime now = LocalDateTime.now();
+		new Task.Backgroundable(project, roots.size() == 1 ? "Exporting diff for review" : "Exporting diffs for review", false) {
+			private final List<Path> exported = new ArrayList<>();
+			private VirtualFile failed;
 			private Exception error;
 
 			@Override
 			public void run(@NotNull ProgressIndicator indicator) {
 				try {
-					exported = DiffExporter.export(project, root.toNioPath(), reviewsDir, changes, LocalDateTime.now());
+					for (VirtualFile root : roots) {
+						failed = root;
+						exported.add(DiffExporter.export(project, root.toNioPath(), reviewsDir, changes.get(root), now, labels.get(root)));
+					}
 				}
 				catch (VcsException | IOException e) {
 					error = e;
@@ -697,23 +761,28 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			@Override
 			public void onSuccess() {
 				if (error != null) {
-					notify(NotificationType.ERROR, "Cannot export the diff: " + error.getMessage());
+					notify(NotificationType.ERROR, "Cannot export the diff of " + failed.getName() + ": " + error.getMessage());
 					return;
 				}
-				String path = reviewsDir + "/" + exported.getFileName();
+				List<String> paths = exported.stream().map(StructureDiffPanel.this::commandPath).toList();
+				String saved = paths.size() == 1
+						? "Diff saved to " + paths.get(0) + "."
+						: "Diffs saved to " + String.join(", ", paths) + ".";
 				if (settings.copyCommandToClipboard() && !settings.skillCommand().isEmpty()) {
-					CopyPasteManager.getInstance().setContents(new StringSelection(settings.skillCommand() + " " + path));
-					notify(NotificationType.INFORMATION, "Diff saved to " + path + ". Review command copied — paste it into your AI agent.");
+					CopyPasteManager.getInstance().setContents(new StringSelection(settings.skillCommand() + " " + String.join(" ", paths)));
+					notify(NotificationType.INFORMATION, saved + " Review command copied — paste it into your AI agent.");
 				} else {
-					notify(NotificationType.INFORMATION, "Diff saved to " + path + ".");
+					notify(NotificationType.INFORMATION, saved);
 				}
-				// DiffExporter already refreshed the file into the VFS
-				VirtualFile file = LocalFileSystem.getInstance().findFileByNioFile(exported);
-				if (file != null) {
-					FileEditorManager editors = FileEditorManager.getInstance(project);
-					editors.openFile(file, true);
-					// shows the patch in the diff viewer; does nothing when the IDE has it disabled (registry enable.patch.file.diff.viewer)
-					editors.setSelectedEditor(file, PATCH_DIFF_EDITOR_TYPE);
+				// DiffExporter already refreshed the files into the VFS
+				FileEditorManager editors = FileEditorManager.getInstance(project);
+				for (Path path : exported) {
+					VirtualFile file = LocalFileSystem.getInstance().findFileByNioFile(path);
+					if (file != null) {
+						editors.openFile(file, true);
+						// shows the patch in the diff viewer; does nothing when the IDE has it disabled (registry enable.patch.file.diff.viewer)
+						editors.setSelectedEditor(file, PATCH_DIFF_EDITOR_TYPE);
+					}
 				}
 			}
 
@@ -1083,6 +1152,18 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 
 	private DefaultMutableTreeNode selectedNode() {
 		return (DefaultMutableTreeNode) tree.getLastSelectedPathComponent();
+	}
+
+	/** All selected nodes; the tree allows selecting several rows with Ctrl or Shift. */
+	private List<DefaultMutableTreeNode> selectedNodes() {
+		TreePath[] paths = tree.getSelectionPaths();
+		if (paths == null) {
+			return List.of();
+		}
+		return Arrays.stream(paths)
+				.map(path -> (DefaultMutableTreeNode) path.getLastPathComponent())
+				.filter(Objects::nonNull)
+				.toList();
 	}
 
 	/** File of the selected node or of its enclosing file node; null for a repository node or no selection. */

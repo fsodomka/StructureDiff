@@ -85,6 +85,15 @@ public class DiffExporterTest extends BasePlatformTestCase {
 		assertTrue(Files.exists(first));
 	}
 
+	public void testLabelsAnExportForOneRepository() throws Exception {
+		List<Change> changes = List.of(new Change(null, new SimpleContentRevision("new\n", path("Added.txt"), "2")));
+
+		Path file = DiffExporter.export(getProject(), root, "reviews", changes,
+				LocalDateTime.of(2026, 10, 15, 9, 5, 7), "repo");
+
+		assertEquals("20261015-090507-repo-changes.diff", file.getFileName().toString());
+	}
+
 	public void testKeepsAnExistingReviewsDirectoryUnignored() throws Exception {
 		Files.createDirectories(root.resolve("reviews"));
 		FilePath added = path("Added.txt");

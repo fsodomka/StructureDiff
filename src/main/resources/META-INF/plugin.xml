@@ -17,7 +17,9 @@
         it forked from <code>main</code>/<code>master</code>, like a merge request (needs Git); <b>Follow Git Log</b>
         &ndash; the commits selected in the Git log.</li>
       <li><b>Export Diff for Review</b> &ndash; saves the changes to <code>reviews/&lt;timestamp&gt;-changes.diff</code>
-        and copies a review skill command to paste into your AI agent. The directory and the command are set in
+        and copies a review skill command to paste into your AI agent. With changes in several repositories, the selected
+        one is exported alone; otherwise each gets a <code>&lt;timestamp&gt;-&lt;repo&gt;-changes.diff</code> and the
+        command lists them all. The directory and the command are set in
         <b>Settings | Tools | Structure Diff</b>.</li>
       <li>Toggles: <b>Show Nested Changes</b> (inside functions and object literals), <b>Show Unversioned Files</b> (except files directly in the
         repository root),

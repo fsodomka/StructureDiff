@@ -10,7 +10,9 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
 - **Modes**: **Uncommitted** changes; **Branch vs main** — everything the branch changed since it forked from
   `main`/`master`, like a merge request (needs Git); **Follow Git Log** — the commits selected in the Git log.
 - **Export Diff for Review** — saves the changes to `reviews/<timestamp>-changes.diff` and copies the
-  review skill command for it to paste into your agent. A new `reviews/` gets a `.gitignore`. The directory, the
+  review skill command for it to paste into your agent. Changes in several repositories: the selected repository is
+  exported on its own, otherwise each repository gets a `<timestamp>-<repo>-changes.diff` and the command lists them
+  all. A new `reviews/` gets a `.gitignore`. The directory, the
   command (default `/adversarial-review`) and whether to copy it are set in **Settings | Tools | Structure
   Diff**.
 - Toggles: **Show Nested Changes** (inside functions and object literals), **Show Unversioned Files** (except files
