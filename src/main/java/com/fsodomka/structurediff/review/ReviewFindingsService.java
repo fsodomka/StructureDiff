@@ -39,6 +39,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -174,14 +175,21 @@ public final class ReviewFindingsService implements PersistentStateComponent<Rev
 
 	/** Loads the newest review of each root, unless it was cleared. */
 	void loadNewest() {
-		roots().forEach(this::loadNewest);
+		loadNewest(roots());
 	}
 
 	private void loadNewest(VirtualFile root) {
-		VirtualFile newest = newestReview(root);
-		if (newest != null && !state.cleared.contains(newest.getPath())) {
-			load(newest, false, false);
-		}
+		loadNewest(List.of(root));
+	}
+
+	/** Lists the reviews directories in the background: the first listing reads the VFS persistence, slow on the EDT. */
+	private void loadNewest(List<VirtualFile> roots) {
+		ReadAction.nonBlocking(() -> roots.stream().map(ReviewFindingsService::newestReview).filter(Objects::nonNull).toList())
+				.finishOnUiThread(ModalityState.defaultModalityState(), newest -> newest.stream()
+						.filter(file -> !state.cleared.contains(file.getPath()))
+						.forEach(file -> load(file, false, false)))
+				.expireWith(this)
+				.submit(AppExecutorUtil.getAppExecutorService());
 	}
 
 	/** Loads the newest review of each root again, also cleared ones. */
@@ -221,7 +229,14 @@ public final class ReviewFindingsService implements PersistentStateComponent<Rev
 	}
 
 	private void load(VirtualFile root, VirtualFile file, boolean replaceNewer, boolean showToolWindow, boolean external) {
-		ReadAction.nonBlocking(() -> parse(root, file))
+		ReadAction.nonBlocking(() -> {
+					List<Finding> findings = parse(root, file);
+					// resolves the paths once here, so that the VFS caches the files and placing them on the EDT reads no persistence
+					if (findings != null) {
+						findings.forEach(finding -> ReviewHighlighter.resolve(root, finding.path()));
+					}
+					return findings;
+				})
 				.finishOnUiThread(ModalityState.defaultModalityState(),
 						findings -> apply(root, file, findings, replaceNewer, showToolWindow, external))
 				.coalesceBy(this, file)

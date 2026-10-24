@@ -27,6 +27,13 @@ tasks.withType(JavaCompile).configureEach {
     options.compilerArgs.add("-Xlint:deprecation")
 }
 
+// e.g. 2026 for 2026.2.3: the layout of the platform modules changed in 2026.x
+def platformYear = providers.gradleProperty('platformVersion').get().tokenize('.')[0].toInteger()
+// set by testLatest: the nested build compiles against another platform, so it must not share the classes and results
+def platformBuildDir = providers.gradleProperty('platformBuildDir')
+if (platformBuildDir.isPresent()) {
+    layout.buildDirectory = file(platformBuildDir.get())
+}
 def platformLocalPath = providers.gradleProperty('platformLocalPath').filter { !it.isBlank() }
 
 dependencies {
@@ -35,6 +42,14 @@ dependencies {
         // Git log and its changes browser, for "Follow Git Log"
         bundledModule('intellij.platform.vcs.impl')
         bundledModule('intellij.platform.vcs.log.impl')
+        // since 2026.x ChangesTree, the VCS log API and the DVCS repository API are in modules of their own
+        if (platformYear >= 2026) {
+            bundledModule('intellij.platform.vcs.impl.shared')
+            bundledModule('intellij.platform.vcs.log')
+            bundledModule('intellij.platform.vcs.log.graph')
+            bundledModule('intellij.platform.vcs.dvcs')
+            bundledModule('intellij.platform.vcs.dvcs.impl')
+        }
         // merge base and diff with the working tree, for "Branch vs main"
         bundledPlugin('Git4Idea')
         testBundledPlugin('com.intellij.java')
@@ -57,6 +72,28 @@ intellijPlatform {
     if (platformLocalPath.isPresent()) {
         pluginVerification.ides.local(platformLocalPath)
     }
+}
+
+// The unified 2026.x distribution bundles the Ultimate module, whose post-startup activity cannot be created in the
+// test container and fails every test that opens a project; the plugin needs the platform only. Older versions
+// need the module to start.
+if (platformYear >= 2026) {
+    tasks.named('prepareTestSandbox') {
+        disabledPlugins.add('com.intellij.modules.ultimate')
+    }
+}
+
+// The tests against the newest IDE too, in a nested build with that platformVersion; check runs both
+def latestPlatformVersion = providers.gradleProperty('latestPlatformVersion').get()
+tasks.register('testLatest', GradleBuild) {
+    group = 'verification'
+    description = "Runs the tests against IntelliJ IDEA $latestPlatformVersion"
+    tasks = ['test']
+    startParameter.projectProperties = [platformVersion: latestPlatformVersion,
+                                        platformBuildDir: layout.buildDirectory.dir('latest').get().asFile.path]
+}
+tasks.named('check') {
+    dependsOn 'testLatest'
 }
 
 tasks.withType(RunIdeTask).configureEach {

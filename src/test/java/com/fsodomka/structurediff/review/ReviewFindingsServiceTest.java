@@ -374,8 +374,11 @@ public class ReviewFindingsServiceTest extends BasePlatformTestCase {
 		assertFalse(service.reviews().iterator().next().external());
 	}
 
+	/** Twice: loading the newest review lists the reviews directory in the background, then parses the file it finds. */
 	private static void waitForLoad() {
-		NonBlockingReadActionImpl.waitForAsyncTaskCompletion();
-		PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue();
+		for (int i = 0; i < 2; i++) {
+			NonBlockingReadActionImpl.waitForAsyncTaskCompletion();
+			PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue();
+		}
 	}
 }
