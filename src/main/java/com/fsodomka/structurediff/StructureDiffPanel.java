@@ -115,6 +115,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private static final String SHOW_NESTED_KEY = "structureDiff.showNested";
 	private static final String SHOW_UNVERSIONED_KEY = "structureDiff.showUnversioned";
 	private static final String FLASH_CHANGES_KEY = "structureDiff.flashChanges";
+	private static final String SHOW_TREEMAP_KEY = "structureDiff.showTreemap";
 	/** Editor type id of the platform's internal DiffPatchFileEditorProvider, which shows a patch file in the diff viewer. */
 	private static final String PATCH_DIFF_EDITOR_TYPE = "DiffPatchFileEditorProvider";
 
@@ -130,6 +131,13 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private boolean showNested = PropertiesComponent.getInstance().getBoolean(SHOW_NESTED_KEY, false);
 	private boolean showUnversioned = PropertiesComponent.getInstance().getBoolean(SHOW_UNVERSIONED_KEY, true);
 	private boolean flashChanges = PropertiesComponent.getInstance().getBoolean(FLASH_CHANGES_KEY, true);
+	private boolean showTreemap = PropertiesComponent.getInstance().getBoolean(SHOW_TREEMAP_KEY, false);
+	private final JScrollPane treeScroll = ScrollPaneFactory.createScrollPane(tree);
+	private final TreemapPanel treemap = new TreemapPanel(tree, StructureDiffPanel::speedSearchText,
+			node -> keyPart(node.getUserObject()), this::jumpToSource, this::openSelected,
+			this::findingsOf, this::showFindings, () -> this.loading, () -> tree.getEmptyText().getText());
+	/** A refresh is in progress, from the start until the first one finishes; shown by the treemap, the tree paints busy. */
+	private boolean loading = true;
 	/** Paths of the unversioned files in {@link #files}; they are loaded even when hidden, so the toggle needs no refresh. */
 	private volatile Set<String> unversionedPaths = Set.of();
 	/** Paths of the files in test sources, marked as such in the tree; looked up off the EDT, as the index may be slow. */
@@ -171,7 +179,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				else if (SwingUtilities.isLeftMouseButton(e) && e.getClickCount() == 1 && path != null) {
 					List<MemberFinding> found = findingsAtIcon(path, e.getX());
 					if (!found.isEmpty()) {
-						ReviewFindingsToolWindowFactory.show(project, found);
+						showFindings(found);
 						e.consume();
 					}
 				}
@@ -187,10 +195,21 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		};
 		tree.addMouseListener(mouse);
 		tree.addMouseMotionListener(mouse);
-		setContent(ScrollPaneFactory.createScrollPane(tree));
+		setContent(showTreemap ? treemap : treeScroll);
 		installPopupMenu();
 
-		DefaultTreeExpander expander = new DefaultTreeExpander(tree);
+		// the treemap shows all levels, so there is nothing to expand or collapse
+		DefaultTreeExpander expander = new DefaultTreeExpander(tree) {
+			@Override
+			public boolean canExpand() {
+				return !showTreemap && super.canExpand();
+			}
+
+			@Override
+			public boolean canCollapse() {
+				return !showTreemap && super.canCollapse();
+			}
+		};
 		DefaultActionGroup group = new DefaultActionGroup();
 		group.add(new DumbAwareAction("Refresh", null, AllIcons.Actions.Refresh) {
 			@Override
@@ -283,6 +302,25 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 					e.getPresentation().setEnabled(false);
 					e.getPresentation().setDescription("Commits have no member changes");
 				}
+				else if (showTreemap) {
+					e.getPresentation().setEnabled(false);
+					e.getPresentation().setDescription("The treemap does not flash changes");
+				}
+			}
+
+		});
+		group.add(new EdtToggleAction("Show as Treemap",
+				"Show the changes as nested rectangles sized by their changed lines", AllIcons.Actions.GroupByModule) {
+			@Override
+			public boolean isSelected(@NotNull AnActionEvent e) {
+				return showTreemap;
+			}
+
+			@Override
+			public void setSelected(@NotNull AnActionEvent e, boolean state) {
+				showTreemap = state;
+				PropertiesComponent.getInstance().setValue(SHOW_TREEMAP_KEY, state, false);
+				setContent(state ? treemap : treeScroll);
 			}
 
 		});
@@ -290,7 +328,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		group.add(CommonActionsManager.getInstance().createExpandAllAction(expander, tree));
 		group.add(CommonActionsManager.getInstance().createCollapseAllAction(expander, tree));
 		ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar("StructureDiff", group, true);
-		toolbar.setTargetComponent(tree);
+		// the panel, not the tree, which is detached while the treemap shows
+		toolbar.setTargetComponent(this);
 		summary.setBorder(JBUI.Borders.empty(2, 8, 4, 8));
 		findingCounts.setBorder(JBUI.Borders.empty(2, 0, 4, 8));
 		findingCounts.setOpaque(false);
@@ -312,7 +351,11 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		setToolbar(top);
 
 		// sources report changes from any thread; the refresh that finishes last clears it
-		source.subscribeReplacing(() -> UIUtil.invokeLaterIfNeeded(() -> tree.setPaintBusy(true)), this);
+		source.subscribeReplacing(() -> UIUtil.invokeLaterIfNeeded(() -> {
+			tree.setPaintBusy(true);
+			loading = true;
+			treemap.repaint();
+		}), this);
 		source.subscribe(this::scheduleRefresh, this);
 		project.getMessageBus().connect(this).<ReviewFindingsListener>subscribe(ReviewFindingsListener.TOPIC, () -> {
 			if (showing) {
@@ -325,6 +368,9 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		addHierarchyListener(e -> {
 			if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0) {
 				showing = isShowing();
+				if (showing) {
+					loadSettings();
+				}
 				if (showing && stale) {
 					stale = false;
 					// also updates the findings
@@ -333,6 +379,32 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			}
 		});
 		scheduleRefresh();
+	}
+
+	/**
+	 * Picks up the toggles saved by another panel: the Uncommitted panel outlives mode switches, and the settings are
+	 * shared by all projects.
+	 */
+	private void loadSettings() {
+		PropertiesComponent properties = PropertiesComponent.getInstance();
+		boolean savedTreemap = properties.getBoolean(SHOW_TREEMAP_KEY, false);
+		if (savedTreemap != showTreemap) {
+			showTreemap = savedTreemap;
+			setContent(showTreemap ? treemap : treeScroll);
+		}
+		boolean savedNested = properties.getBoolean(SHOW_NESTED_KEY, false);
+		boolean savedUnversioned = properties.getBoolean(SHOW_UNVERSIONED_KEY, true);
+		boolean savedFlash = properties.getBoolean(FLASH_CHANGES_KEY, true);
+		if (!savedFlash && flashChanges) {
+			flashes.clear();
+		}
+		boolean reshow = savedNested != showNested || savedUnversioned != showUnversioned || savedFlash != flashChanges;
+		showNested = savedNested;
+		showUnversioned = savedUnversioned;
+		flashChanges = savedFlash;
+		if (reshow) {
+			show(files, false);
+		}
 	}
 
 	/** Show Diff (Ctrl+D), Jump to Source (F4) and Copy Path, with the shortcuts of the matching IDE actions. */
@@ -353,6 +425,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			return true;
 		}));
 		PopupHandler.installPopupMenu(tree, popup, "StructureDiffPopup");
+		PopupHandler.installPopupMenu(treemap, popup, "StructureDiffPopup");
 	}
 
 	private DumbAwareAction treeAction(String text, Icon icon, String shortcutActionId, BooleanSupplier enabled,
@@ -376,6 +449,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		AnAction shortcutSource = shortcutActionId == null ? null : ActionManager.getInstance().getAction(shortcutActionId);
 		if (shortcutSource != null) {
 			action.registerCustomShortcutSet(shortcutSource.getShortcutSet(), tree);
+			action.registerCustomShortcutSet(shortcutSource.getShortcutSet(), treemap);
 		}
 		return action;
 	}
@@ -410,7 +484,9 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		UIUtil.invokeLaterIfNeeded(() -> {
 			if (current == generation.get()) {
 				tree.setPaintBusy(false);
+				loading = false;
 				tree.getEmptyText().setText("Could not load changes");
+				treemap.repaint();
 			}
 		});
 	}
@@ -473,6 +549,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				.finishOnUiThread(ModalityState.any(), snapshot -> {
 					if (current == generation.get()) {
 						tree.setPaintBusy(false);
+						loading = false;
 						tree.getEmptyText().setText(StatusText.getDefaultEmptyText());
 						files = snapshot.files();
 						vcsRoots = snapshot.roots();
@@ -815,6 +892,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 					if (current == findingsGeneration.get()) {
 						findings = result;
 						tree.repaint();
+						treemap.repaint();
 						updateFindingCounts();
 					}
 				})
@@ -886,6 +964,27 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	 */
 	private List<MemberFinding> findingsOf(DefaultMutableTreeNode node) {
 		return findingsOf(node, findings);
+	}
+
+	private void showFindings(List<MemberFinding> found) {
+		ReviewFindingsToolWindowFactory.show(project, found);
+	}
+
+	/** {@code tooltip} (plain text or HTML) followed by one line per finding; for the tree and the treemap. */
+	static String withFindings(String tooltip, List<MemberFinding> found) {
+		if (found.isEmpty()) {
+			return tooltip;
+		}
+		StringBuilder html = new StringBuilder("<html>");
+		if (tooltip != null) {
+			html.append(tooltip.startsWith("<html>")
+					? StringUtil.trimEnd(StringUtil.trimStart(tooltip, "<html>"), "</html>")
+					: StringUtil.escapeXmlEntities(tooltip)).append("<br>");
+		}
+		for (MemberFinding finding : found) {
+			html.append("<br>").append(StringUtil.escapeXmlEntities(finding.title()));
+		}
+		return html.append("</html>").toString();
 	}
 
 	static List<MemberFinding> findingsOf(DefaultMutableTreeNode node, Map<String, List<MemberFinding>> findings) {
@@ -1453,23 +1552,6 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			}
 			Icon severity = found.getFirst().icon();
 			return icon == null ? severity : new RowIcon(icon, severity);
-		}
-
-		/** {@code tooltip} (plain text or HTML) followed by one line per finding. */
-		private static String withFindings(String tooltip, List<MemberFinding> found) {
-			if (found.isEmpty()) {
-				return tooltip;
-			}
-			StringBuilder html = new StringBuilder("<html>");
-			if (tooltip != null) {
-				html.append(tooltip.startsWith("<html>")
-						? StringUtil.trimEnd(StringUtil.trimStart(tooltip, "<html>"), "</html>")
-						: StringUtil.escapeXmlEntities(tooltip)).append("<br>");
-			}
-			for (MemberFinding finding : found) {
-				html.append("<br>").append(StringUtil.escapeXmlEntities(finding.title()));
-			}
-			return html.append("</html>").toString();
 		}
 
 
