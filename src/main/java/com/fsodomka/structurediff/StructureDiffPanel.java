@@ -132,6 +132,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private boolean flashChanges = PropertiesComponent.getInstance().getBoolean(FLASH_CHANGES_KEY, true);
 	/** Paths of the unversioned files in {@link #files}; they are loaded even when hidden, so the toggle needs no refresh. */
 	private volatile Set<String> unversionedPaths = Set.of();
+	/** Paths of the files in test sources, marked as such in the tree; looked up off the EDT, as the index may be slow. */
+	private volatile Set<String> testPaths = Set.of();
 	/** Review findings by absolute file path, see {@link FindingMembers}; EDT only. */
 	private Map<String, List<MemberFinding>> findings = Map.of();
 	private final AtomicInteger findingsGeneration = new AtomicInteger();
@@ -440,8 +442,14 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		AtomicReferenceArray<FileDiff> computed = new AtomicReferenceArray<>(loaded.size());
 		ReadAction.nonBlocking(() -> {
 					ProjectLevelVcsManager vcsManager = ProjectLevelVcsManager.getInstance(project);
+					ProjectFileIndex fileIndex = ProjectFileIndex.getInstance(project);
 					Map<String, VirtualFile> roots = new HashMap<>();
+					Set<String> tests = new HashSet<>();
 					for (FileDiff file : loaded) {
+						VirtualFile virtualFile = LocalFileSystem.getInstance().findFileByPath(file.path());
+						if (virtualFile != null && fileIndex.isInTestSourceContent(virtualFile)) {
+							tests.add(file.path());
+						}
 						VirtualFile root = vcsManager.getVcsRootFor(ChangesUtil.getFilePath(file.change()));
 						if (root != null) {
 							roots.put(file.path(), root);
@@ -456,7 +464,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 						}
 						withMembers.add(file);
 					}
-					return new Snapshot(withMembers, roots, unversioned.stream().map(FilePath::getPath).collect(Collectors.toSet()));
+					return new Snapshot(withMembers, roots, unversioned.stream().map(FilePath::getPath).collect(Collectors.toSet()), tests);
 				})
 				.inSmartMode(project)
 				.expireWith(this)
@@ -469,6 +477,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 						files = snapshot.files();
 						vcsRoots = snapshot.roots();
 						unversionedPaths = snapshot.unversioned();
+						testPaths = snapshot.tests();
 						show(snapshot.files(), highlight);
 						// the tree may show other members now, and edits may have moved the findings into other ones
 						updateFindings();
@@ -491,7 +500,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		}
 	}
 
-	private record Snapshot(List<FileDiff> files, Map<String, VirtualFile> roots, Set<String> unversioned) {
+	private record Snapshot(List<FileDiff> files, Map<String, VirtualFile> roots, Set<String> unversioned, Set<String> tests) {
 	}
 
 	/** Group node of one VCS root. */
@@ -1431,8 +1440,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		}
 		/** {@code icon} with the test marker when {@code path} is in test sources, as the Project view shows test classes. */
 		private Icon withTestMark(Icon icon, String path) {
-			VirtualFile file = LocalFileSystem.getInstance().findFileByPath(path);
-			if (icon == null || file == null || !ReadAction.compute(() -> ProjectFileIndex.getInstance(project).isInTestSourceContent(file))) {
+			if (icon == null || !testPaths.contains(path)) {
 				return icon;
 			}
 			return IconManager.getInstance().createLayered(icon, AllIcons.Nodes.JunitTestMark);
