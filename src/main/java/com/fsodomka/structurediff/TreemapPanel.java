@@ -1,5 +1,6 @@
 package com.fsodomka.structurediff;
 
+import com.fsodomka.structurediff.DiagnosticMembers.MemberDiagnostic;
 import com.fsodomka.structurediff.review.FindingMembers.MemberFinding;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.ui.AnimatedIcon;
@@ -35,6 +36,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.function.ToDoubleFunction;
 
@@ -51,6 +53,8 @@ final class TreemapPanel extends JComponent {
 	/** Identifies a node among its siblings, stable across refreshes; labels are not unique, as overloads show. */
 	private final Function<DefaultMutableTreeNode, String> key;
 	private final Function<DefaultMutableTreeNode, List<MemberFinding>> findings;
+	private final Function<DefaultMutableTreeNode, List<MemberDiagnostic>> diagnostics;
+	private final Predicate<DefaultMutableTreeNode> notAnalysed;
 	private final BooleanSupplier loading;
 	private final Supplier<String> emptyText;
 	/** Painted rectangles, parents before their children; the last one containing a point is the deepest node there. */
@@ -59,6 +63,8 @@ final class TreemapPanel extends JComponent {
 	private final List<Hit> zoomHits = new ArrayList<>();
 	/** The painted severity icons; a click opens the node's findings. */
 	private final List<Hit> iconHits = new ArrayList<>();
+	/** The painted diagnostic icons; a click opens the node's most severe diagnostic. */
+	private final List<Hit> diagnosticHits = new ArrayList<>();
 	/** The breadcrumb segments; a null node is the root. */
 	private final List<Hit> crumbHits = new ArrayList<>();
 	/** Weights of the nodes painted, computed once per paint. */
@@ -83,17 +89,24 @@ final class TreemapPanel extends JComponent {
 	 * @param onDiff   middle click, like the tree's
 	 * @param findings the review findings shown on a node, most severe first
 	 * @param onFindings click on a severity icon, like the tree's
+	 * @param diagnostics the IDE's diagnostics shown on a node, most severe first
+	 * @param notAnalysed whether a node is a changed file the IDE has not analysed
+	 * @param onDiagnostic click on a diagnostic icon, like the tree's
 	 * @param loading   whether a refresh is in progress; the caller repaints when it changes
 	 * @param emptyText shown when there is nothing to show, like the tree's
 	 */
 	TreemapPanel(JTree tree, Function<DefaultMutableTreeNode, String> label, Function<DefaultMutableTreeNode, String> key,
 			Runnable onOpen, Runnable onDiff,
 			Function<DefaultMutableTreeNode, List<MemberFinding>> findings, Consumer<List<MemberFinding>> onFindings,
+			Function<DefaultMutableTreeNode, List<MemberDiagnostic>> diagnostics, Predicate<DefaultMutableTreeNode> notAnalysed,
+			Consumer<DefaultMutableTreeNode> onDiagnostic,
 			BooleanSupplier loading, Supplier<String> emptyText) {
 		this.tree = tree;
 		this.label = label;
 		this.key = key;
 		this.findings = findings;
+		this.diagnostics = diagnostics;
+		this.notAnalysed = notAnalysed;
 		this.loading = loading;
 		this.emptyText = emptyText;
 		setOpaque(true);
@@ -205,6 +218,11 @@ final class TreemapPanel extends JComponent {
 						onFindings.accept(findings.apply(withIcon));
 						return;
 					}
+					DefaultMutableTreeNode withDiagnostic = hitAt(diagnosticHits, e.getPoint());
+					if (withDiagnostic != null) {
+						onDiagnostic.accept(withDiagnostic);
+						return;
+					}
 					for (Hit crumb : crumbHits) {
 						if (crumb.rect().contains(e.getPoint())) {
 							zoomTo(crumb.node() == null ? List.of() : pathKeys(crumb.node()));
@@ -233,12 +251,29 @@ final class TreemapPanel extends JComponent {
 			@Override
 			public void mouseMoved(MouseEvent e) {
 				// a hand over a severity icon, as in the tree
-				boolean onIcon = hitAt(iconHits, e.getPoint()) != null;
+				boolean onIcon = hitAt(iconHits, e.getPoint()) != null || hitAt(diagnosticHits, e.getPoint()) != null;
 				setCursor(onIcon ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : null);
 			}
 		};
 		addMouseListener(mouse);
 		addMouseMotionListener(mouse);
+	}
+
+	/**
+	 * Paints {@code icon} left of the {@code taken} width in the top right corner of {@code r} when it fits, and records
+	 * its hit; returns the width taken, 0 when it does not fit.
+	 */
+	private int paintCornerIcon(Graphics2D g, Icon icon, Rectangle r, int header, int pad, int taken,
+								DefaultMutableTreeNode node, List<Hit> iconHits) {
+		if (r.width < taken + icon.getIconWidth() + 2 * pad || r.height < icon.getIconHeight()) {
+			return 0;
+		}
+		int width = icon.getIconWidth() + pad;
+		int iconX = r.x + r.width - taken - width;
+		int iconY = r.y + Math.max(0, (header - icon.getIconHeight()) / 2);
+		icon.paintIcon(this, g, iconX, iconY);
+		iconHits.add(new Hit(new Rectangle2D.Double(iconX, iconY, icon.getIconWidth(), icon.getIconHeight()), node));
+		return width;
 	}
 
 	@Override
@@ -249,8 +284,8 @@ final class TreemapPanel extends JComponent {
 		}
 		int[] lines = lines(node.getUserObject());
 		String text = label.apply(node);
-		return StructureDiffPanel.withFindings(lines == null ? text : text + "  +" + lines[0] + " −" + lines[1],
-				findings.apply(node));
+		return StructureDiffPanel.withSignals(lines == null ? text : text + "  +" + lines[0] + " −" + lines[1],
+				findings.apply(node), diagnostics.apply(node), notAnalysed.test(node));
 	}
 
 	private DefaultMutableTreeNode nodeAt(Point point) {
@@ -376,6 +411,7 @@ final class TreemapPanel extends JComponent {
 			hits.clear();
 			zoomHits.clear();
 			iconHits.clear();
+			diagnosticHits.clear();
 			crumbHits.clear();
 			weights.clear();
 			DefaultMutableTreeNode root = (DefaultMutableTreeNode) tree.getModel().getRoot();
@@ -505,16 +541,21 @@ final class TreemapPanel extends JComponent {
 		int pad = JBUI.scale(3);
 		int header = metrics.getHeight() + pad;
 		boolean nested = !node.isLeaf() && r.width > 4 * pad && r.height > header + 3 * pad;
-		// the icon of the most severe finding, in the top right corner as in the tree's row
+		// the icons of the most severe finding and diagnostic, in the top right corner in the tree row's order; the
+		// diagnostic's only when both fit
 		List<MemberFinding> found = findings.apply(node);
+		List<MemberDiagnostic> diags = diagnostics.apply(node);
 		Icon severity = found.isEmpty() ? null : found.getFirst().icon();
+		Icon diagnostic = diags.isEmpty() ? null : diags.getFirst().icon();
+		if (severity != null && diagnostic != null && r.width < severity.getIconWidth() + diagnostic.getIconWidth() + 3 * pad) {
+			diagnostic = null;
+		}
 		int iconWidth = 0;
-		if (severity != null && r.width >= severity.getIconWidth() + 2 * pad && r.height >= severity.getIconHeight()) {
-			iconWidth = severity.getIconWidth() + pad;
-			int iconX = r.x + r.width - iconWidth;
-			int iconY = r.y + Math.max(0, (header - severity.getIconHeight()) / 2);
-			severity.paintIcon(this, g, iconX, iconY);
-			iconHits.add(new Hit(new Rectangle2D.Double(iconX, iconY, severity.getIconWidth(), severity.getIconHeight()), node));
+		if (diagnostic != null) {
+			iconWidth += paintCornerIcon(g, diagnostic, r, header, pad, iconWidth, node, diagnosticHits);
+		}
+		if (severity != null) {
+			iconWidth += paintCornerIcon(g, severity, r, header, pad, iconWidth, node, iconHits);
 		}
 		int labelWidth = r.width - 2 * pad - iconWidth;
 		String text = r.height >= metrics.getHeight() ? ellipsize(label.apply(node), metrics, labelWidth) : "";

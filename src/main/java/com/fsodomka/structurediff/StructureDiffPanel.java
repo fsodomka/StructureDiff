@@ -1,10 +1,13 @@
 package com.fsodomka.structurediff;
 
+import com.fsodomka.structurediff.DiagnosticMembers.Diagnostics;
+import com.fsodomka.structurediff.DiagnosticMembers.MemberDiagnostic;
 import com.fsodomka.structurediff.review.FindingMembers;
 import com.fsodomka.structurediff.review.FindingMembers.MemberFinding;
 import com.fsodomka.structurediff.review.ReviewFindingsListener;
 import com.fsodomka.structurediff.review.ReviewFindingsToolWindowFactory;
 import com.fsodomka.structurediff.review.ReviewSeverity;
+import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
 import com.intellij.diff.DiffContentFactory;
 import com.intellij.diff.DiffManager;
 import com.intellij.diff.contents.DiffContent;
@@ -25,7 +28,9 @@ import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
+import com.intellij.openapi.fileEditor.FileEditorManagerListener;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.progress.ProgressIndicator;
@@ -81,6 +86,7 @@ import java.util.*;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
@@ -135,7 +141,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private final JScrollPane treeScroll = ScrollPaneFactory.createScrollPane(tree);
 	private final TreemapPanel treemap = new TreemapPanel(tree, StructureDiffPanel::speedSearchText,
 			node -> keyPart(node.getUserObject()), this::jumpToSource, this::openSelected,
-			this::findingsOf, this::showFindings, () -> this.loading, () -> tree.getEmptyText().getText());
+			this::findingsOf, this::showFindings, this::diagnosticsOf, this::notAnalysed, this::openDiagnostic, () -> this.loading, () -> tree.getEmptyText().getText());
 	/** A refresh is in progress, from the start until the first one finishes; shown by the treemap, the tree paints busy. */
 	private boolean loading = true;
 	/** Paths of the unversioned files in {@link #files}; they are loaded even when hidden, so the toggle needs no refresh. */
@@ -145,6 +151,11 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	/** Review findings by absolute file path, see {@link FindingMembers}; EDT only. */
 	private Map<String, List<MemberFinding>> findings = Map.of();
 	private final AtomicInteger findingsGeneration = new AtomicInteger();
+	/** The IDE's diagnostics on the shown files with an open editor, see {@link DiagnosticMembers}; EDT only. */
+	private Diagnostics diagnostics = Diagnostics.NONE;
+	private final AtomicInteger diagnosticsGeneration = new AtomicInteger();
+	/** Only touched by the diagnostics computation, which may overlap a cancelled older one. */
+	private final Map<String, DiagnosticMembers.CachedKeyPaths> diagnosticsCache = new ConcurrentHashMap<>();
 	/** Whether the panel is showing; a hidden panel (other mode, closed tool window) does not refresh. */
 	private volatile boolean showing;
 	/** A refresh or findings update was skipped while hidden; done when the panel shows again. */
@@ -177,9 +188,13 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 					e.consume();
 				}
 				else if (SwingUtilities.isLeftMouseButton(e) && e.getClickCount() == 1 && path != null) {
-					List<MemberFinding> found = findingsAtIcon(path, e.getX());
-					if (!found.isEmpty()) {
-						showFindings(found);
+					Signal signal = signalAt(path, e.getX());
+					if (signal == Signal.REVIEW) {
+						showFindings(findingsOf((DefaultMutableTreeNode) path.getLastPathComponent()));
+						e.consume();
+					}
+					else if (signal == Signal.IDE) {
+						openDiagnostic((DefaultMutableTreeNode) path.getLastPathComponent());
 						e.consume();
 					}
 				}
@@ -187,9 +202,9 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 
 			@Override
 			public void mouseMoved(MouseEvent e) {
-				// a hand over a severity icon, which opens its findings
+				// a hand over a severity icon, which opens its findings or the diagnostic
 				TreePath path = tree.getPathForLocation(e.getX(), e.getY());
-				boolean onIcon = path != null && !findingsAtIcon(path, e.getX()).isEmpty();
+				boolean onIcon = path != null && signalAt(path, e.getX()) != null;
 				tree.setCursor(onIcon ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : null);
 			}
 		};
@@ -363,6 +378,31 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			}
 			else {
 				stale = true;
+			}
+		});
+		ApplicationManager.getApplication().getMessageBus().connect(this)
+				.<StructureDiffSettings.DiagnosticLevelsListener>subscribe(StructureDiffSettings.DiagnosticLevelsListener.TOPIC, this::diagnosticsChanged);
+		project.getMessageBus().connect(this).subscribe(DaemonCodeAnalyzer.DAEMON_EVENT_TOPIC, new DaemonCodeAnalyzer.DaemonListener() {
+			@Override
+			public void daemonFinished(@NotNull Collection<? extends FileEditor> fileEditors) {
+				if (fileEditors.stream().anyMatch(editor -> editor.getFile() != null && isShownFile(editor.getFile()))) {
+					diagnosticsChanged();
+				}
+			}
+		});
+		project.getMessageBus().connect(this).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, new FileEditorManagerListener() {
+			@Override
+			public void fileOpened(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
+				if (isShownFile(file)) {
+					diagnosticsChanged();
+				}
+			}
+
+			@Override
+			public void fileClosed(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
+				if (isShownFile(file)) {
+					diagnosticsChanged();
+				}
 			}
 		});
 		addHierarchyListener(e -> {
@@ -558,6 +598,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 						show(snapshot.files(), highlight);
 						// the tree may show other members now, and edits may have moved the findings into other ones
 						updateFindings();
+						updateDiagnostics();
 					}
 				})
 				.submit(AppExecutorUtil.getAppExecutorService())
@@ -899,6 +940,52 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				.submit(AppExecutorUtil.getAppExecutorService());
 	}
 
+	private boolean isShownFile(VirtualFile file) {
+		String path = file.getPath();
+		return files.stream().anyMatch(f -> f.path().equals(path));
+	}
+
+	/** The daemon's results or the open editors changed; updated now, or when the panel shows again. */
+	private void diagnosticsChanged() {
+		if (showing) {
+			updateDiagnostics();
+		}
+		else {
+			stale = true;
+		}
+	}
+
+	/**
+	 * Recomputes the IDE's diagnostics on the shown files, then repaints; none when turned off or when the after side is
+	 * not the working tree, whose offsets would not match the editor's document.
+	 */
+	private void updateDiagnostics() {
+		int current = diagnosticsGeneration.incrementAndGet();
+		StructureDiffSettings settings = StructureDiffSettings.getInstance();
+		Set<DiagnosticMembers.Level> shown = settings.diagnosticLevels();
+		if (shown.isEmpty() || !source.hasUnversioned()) {
+			if (diagnostics != Diagnostics.NONE) {
+				diagnostics = Diagnostics.NONE;
+				tree.repaint();
+				treemap.repaint();
+			}
+			return;
+		}
+		Supplier<Diagnostics> compute = DiagnosticMembers.prepare(project, shownFiles(files), shown, diagnosticsCache);
+		ReadAction.nonBlocking(compute::get)
+				.expireWith(this)
+				// cancels an older computation, whose result would be discarded anyway
+				.coalesceBy(this, diagnosticsGeneration)
+				.finishOnUiThread(ModalityState.any(), result -> {
+					if (current == diagnosticsGeneration.get()) {
+						diagnostics = result;
+						tree.repaint();
+						treemap.repaint();
+					}
+				})
+				.submit(AppExecutorUtil.getAppExecutorService());
+	}
+
 	/** Shows the {@link #findingCounts} of the shown files; findings of other files are mentioned in the tooltip only. */
 	private void updateFindingCounts() {
 		int[] counts = findingCounts(shownFiles(files), findings);
@@ -911,51 +998,51 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				texts.add(severity.countText(count));
 			}
 		}
-		int other = counts[counts.length - 1];
-		findingCounts.setToolTipText(texts.isEmpty() ? null
-				: "<html>" + String.join(", ", texts) + (other > 0 ? "<br>" + other + " more in other files" : "") + "</html>");
+		findingCounts.setToolTipText(texts.isEmpty() ? null : "Review findings: " + String.join(", ", texts));
 		findingCounts.setVisible(!texts.isEmpty());
 		findingCounts.revalidate();
 		findingCounts.repaint();
 	}
 
-	/**
-	 * Findings per {@link ReviewSeverity} ordinal in {@code shownFiles}, so the sum of the file nodes' counts; the last
-	 * element counts the findings of all other files.
-	 */
+	/** Findings per {@link ReviewSeverity} ordinal in {@code shownFiles}, so the sum of the file nodes' counts. */
 	static int[] findingCounts(List<FileDiff> shownFiles, Map<String, List<MemberFinding>> findings) {
-		Set<String> shown = shownFiles.stream().map(FileDiff::path).collect(Collectors.toSet());
-		int[] counts = new int[ReviewSeverity.values().length + 1];
-		findings.forEach((path, found) -> {
-			if (shown.contains(path)) {
-				found.forEach(finding -> counts[finding.severity().ordinal()]++);
-			}
-			else {
-				counts[counts.length - 1] += found.size();
-			}
-		});
+		int[] counts = new int[ReviewSeverity.values().length];
+		for (FileDiff file : shownFiles) {
+			findings.getOrDefault(file.path(), List.of()).forEach(finding -> counts[finding.severity().ordinal()]++);
+		}
 		return counts;
 	}
 
-	/** The findings of the node at {@code path} when {@code x} is on its severity icon, else empty. */
-	private List<MemberFinding> findingsAtIcon(TreePath path, int x) {
+	/** The icons after a node's own: the most severe review finding's, then the most severe diagnostic's. */
+	enum Signal {REVIEW, IDE}
+
+	/** The signal icon of the node at {@code path} that {@code x} is on, or null. */
+	private Signal signalAt(TreePath path, int x) {
 		DefaultMutableTreeNode node = (DefaultMutableTreeNode) path.getLastPathComponent();
 		Rectangle bounds = tree.getPathBounds(path);
 		if (bounds == null || node.getUserObject() instanceof Ghost) {
-			return List.of();
+			return null;
 		}
 		List<MemberFinding> found = findingsOf(node);
-		if (found.isEmpty()) {
-			return found;
+		List<MemberDiagnostic> diags = diagnosticsOf(node);
+		if (found.isEmpty() && diags.isEmpty()) {
+			return null;
 		}
 		Component component = tree.getCellRenderer().getTreeCellRendererComponent(tree, node, tree.isPathSelected(path),
 				tree.isExpanded(path), node.isLeaf(), tree.getRowForPath(path), false);
 		if (!(component instanceof Renderer renderer) || renderer.getIcon() == null) {
-			return List.of();
+			return null;
 		}
-		// the renderer paints its icon at ipad.left, the severity icon last in it
+		// the renderer paints its icon at ipad.left, the signal icons last in it, the diagnostic's after the finding's
 		int end = bounds.x + renderer.getIpad().left + renderer.getIcon().getIconWidth();
-		return x >= end - found.getFirst().icon().getIconWidth() && x < end ? found : List.of();
+		if (!diags.isEmpty()) {
+			int start = end - diags.getFirst().icon().getIconWidth();
+			if (x >= start && x < end) {
+				return Signal.IDE;
+			}
+			end = start;
+		}
+		return !found.isEmpty() && x >= end - found.getFirst().icon().getIconWidth() && x < end ? Signal.REVIEW : null;
 	}
 
 	/**
@@ -966,13 +1053,44 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		return findingsOf(node, findings);
 	}
 
+	/** Diagnostics shown on a node, most severe first, placed as {@link #findingsOf(DefaultMutableTreeNode)}. */
+	private List<MemberDiagnostic> diagnosticsOf(DefaultMutableTreeNode node) {
+		return placedOn(node, diagnostics.byPath(), MemberDiagnostic::keyPath);
+	}
+
+	/** Whether {@code node} is a changed file the IDE has not analysed, as it has no open editor. */
+	private boolean notAnalysed(DefaultMutableTreeNode node) {
+		return diagnostics != Diagnostics.NONE && node.getUserObject() instanceof FileDiff file
+				&& file.status() != FileStatus.DELETED && !diagnostics.analysed().contains(file.path());
+	}
+
+	/** Opens the node's file at its most severe diagnostic. */
+	private void openDiagnostic(DefaultMutableTreeNode node) {
+		List<MemberDiagnostic> diags = diagnosticsOf(node);
+		DefaultMutableTreeNode fileNode = node;
+		while (fileNode != null && !(fileNode.getUserObject() instanceof FileDiff)) {
+			fileNode = (DefaultMutableTreeNode) fileNode.getParent();
+		}
+		VirtualFile file = fileNode == null ? null
+				: LocalFileSystem.getInstance().findFileByPath(((FileDiff) fileNode.getUserObject()).path());
+		if (!diags.isEmpty() && file != null) {
+			new OpenFileDescriptor(project, file, diags.getFirst().offset()).navigate(true);
+		}
+	}
+
 	private void showFindings(List<MemberFinding> found) {
 		ReviewFindingsToolWindowFactory.show(project, found);
 	}
 
-	/** {@code tooltip} (plain text or HTML) followed by one line per finding; for the tree and the treemap. */
-	static String withFindings(String tooltip, List<MemberFinding> found) {
-		if (found.isEmpty()) {
+	/** Diagnostics listed in a tooltip; the rest are counted. */
+	static final int MAX_TOOLTIP_DIAGNOSTICS = 5;
+
+	/**
+	 * {@code tooltip} (plain text or HTML) followed by a section per source, the review findings, then the IDE's
+	 * diagnostics, and a line when the file is not analysed; for the tree and the treemap.
+	 */
+	static String withSignals(String tooltip, List<MemberFinding> found, List<MemberDiagnostic> diags, boolean notAnalysed) {
+		if (found.isEmpty() && diags.isEmpty() && !notAnalysed) {
 			return tooltip;
 		}
 		StringBuilder html = new StringBuilder("<html>");
@@ -981,14 +1099,49 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 					? StringUtil.trimEnd(StringUtil.trimStart(tooltip, "<html>"), "</html>")
 					: StringUtil.escapeXmlEntities(tooltip)).append("<br>");
 		}
-		for (MemberFinding finding : found) {
-			html.append("<br>").append(StringUtil.escapeXmlEntities(finding.title()));
+		if (!found.isEmpty()) {
+			html.append("<br><b>Review</b>");
+			for (MemberFinding finding : found) {
+				html.append("<br>").append(StringUtil.escapeXmlEntities(finding.title()));
+			}
+		}
+		if (!diags.isEmpty()) {
+			html.append("<br><b>IDE</b>");
+			for (MemberDiagnostic diag : diags.subList(0, Math.min(diags.size(), MAX_TOOLTIP_DIAGNOSTICS))) {
+				html.append("<br>").append(diag.level().text).append(" · ").append(StringUtil.escapeXmlEntities(diag.message()));
+			}
+			if (diags.size() > MAX_TOOLTIP_DIAGNOSTICS) {
+				html.append("<br>and ").append(diags.size() - MAX_TOOLTIP_DIAGNOSTICS).append(" more");
+			}
+		}
+		if (notAnalysed) {
+			html.append("<br><i>Not analysed by the IDE: double-click to open it</i>");
 		}
 		return html.append("</html>").toString();
 	}
 
+	/** {@code icon} followed by the icon of the most severe finding, then that of the most severe diagnostic. */
+	static Icon withSignalIcons(Icon icon, List<MemberFinding> found, List<MemberDiagnostic> diags) {
+		List<Icon> icons = new ArrayList<>(3);
+		if (icon != null) {
+			icons.add(icon);
+		}
+		if (!found.isEmpty()) {
+			icons.add(found.getFirst().icon());
+		}
+		if (!diags.isEmpty()) {
+			icons.add(diags.getFirst().icon());
+		}
+		return icons.isEmpty() ? null : icons.size() == 1 ? icons.getFirst() : new RowIcon(icons.toArray(Icon[]::new));
+	}
+
 	static List<MemberFinding> findingsOf(DefaultMutableTreeNode node, Map<String, List<MemberFinding>> findings) {
-		if (findings.isEmpty()) {
+		return placedOn(node, findings, MemberFinding::keyPath);
+	}
+
+	/** Items by absolute file path shown on a node, placed as {@link #findingsOf(DefaultMutableTreeNode)} places findings. */
+	static <T> List<T> placedOn(DefaultMutableTreeNode node, Map<String, List<T>> byPath, Function<T, List<String>> keyPathOf) {
+		if (byPath.isEmpty()) {
 			return List.of();
 		}
 		List<String> keyPath = new ArrayList<>();
@@ -1000,14 +1153,17 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		if (fileNode == null || !(fileNode.getUserObject() instanceof FileDiff file)) {
 			return List.of();
 		}
-		List<MemberFinding> fileFindings = findings.getOrDefault(file.path(), List.of());
+		List<T> fileItems = byPath.getOrDefault(file.path(), List.of());
 		int depth = keyPath.size();
 		if (depth == 0) {
-			return fileFindings;
+			return fileItems;
 		}
-		return fileFindings.stream()
-				.filter(f -> f.keyPath().size() >= depth && f.keyPath().subList(0, depth).equals(keyPath)
-						&& (f.keyPath().size() == depth || !hasMemberChild(node, f.keyPath().get(depth))))
+		return fileItems.stream()
+				.filter(item -> {
+					List<String> itemPath = keyPathOf.apply(item);
+					return itemPath.size() >= depth && itemPath.subList(0, depth).equals(keyPath)
+							&& (itemPath.size() == depth || !hasMemberChild(node, itemPath.get(depth)));
+				})
 				.toList();
 	}
 
@@ -1472,7 +1628,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				String path = relativePath(file.path(), basePath);
 				int slash = path.lastIndexOf('/');
 				List<MemberFinding> found = ghost ? List.of() : findingsOf(node);
-				setIcon(withFindingIcon(withTestMark(file.fileType().getIcon(), file.path()), found));
+				List<MemberDiagnostic> diags = ghost ? List.of() : diagnosticsOf(node);
+				setIcon(withSignalIcons(withTestMark(file.fileType().getIcon(), file.path()), found, diags));
 				append(path.substring(slash + 1), attributes(restored ? FileStatus.NOT_CHANGED : file.status(), ghost && !restored, background));
 				if (file.members() != null && !ghost) {
 					int[] counts = new int[3];
@@ -1498,19 +1655,20 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 					moved = (change.isMoved() ? "Moved from " : "Renamed from ") + FileUtil.toSystemDependentName(beforePath);
 				}
 				String lines = file.linesAdded() + file.linesRemoved() == 0 ? null : linesText(file.linesAdded(), file.linesRemoved());
-				setToolTipText(withFindings(moved == null ? lines : lines == null ? moved
-						: "<html>" + StringUtil.escapeXmlEntities(moved) + "<br>" + lines + "</html>", found));
+				setToolTipText(withSignals(moved == null ? lines : lines == null ? moved
+						: "<html>" + StringUtil.escapeXmlEntities(moved) + "<br>" + lines + "</html>", found, diags, !ghost && notAnalysed(node)));
 			}
 			else if (item instanceof MemberDiff member) {
 				List<MemberFinding> found = ghost ? List.of() : findingsOf(node);
+				List<MemberDiagnostic> diags = ghost ? List.of() : diagnosticsOf(node);
 				Icon icon = member.icon();
 				if (((DefaultMutableTreeNode) node.getParent()).getUserObject() instanceof FileDiff parent) {
 					icon = withTestMark(icon, parent.path());
 				}
-				setIcon(withFindingIcon(icon, found));
+				setIcon(withSignalIcons(icon, found, diags));
 				String shortLabel = shorten(member.label());
 				append(shortLabel, attributes(restored ? FileStatus.NOT_CHANGED : member.status(), ghost && !restored, background));
-				setToolTipText(withFindings(tooltip(member), found));
+				setToolTipText(withSignals(tooltip(member), found, diags, false));
 			}
 		}
 
@@ -1543,15 +1701,6 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				return icon;
 			}
 			return IconManager.getInstance().createLayered(icon, AllIcons.Nodes.JunitTestMark);
-		}
-
-		/** {@code icon} followed by the icon of the most severe finding. */
-		private static Icon withFindingIcon(Icon icon, List<MemberFinding> found) {
-			if (found.isEmpty()) {
-				return icon;
-			}
-			Icon severity = found.getFirst().icon();
-			return icon == null ? severity : new RowIcon(icon, severity);
 		}
 
 

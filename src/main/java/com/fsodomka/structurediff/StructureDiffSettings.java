@@ -5,13 +5,16 @@ import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
+import com.intellij.util.messages.Topic;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.EnumSet;
+import java.util.Set;
 
-/** Where review files are exchanged with the review skill, and how it is invoked; the same for all projects. */
+/** Where review files are exchanged with the review skill, how it is invoked, and which diagnostics are shown; the same for all projects. */
 @Service(Service.Level.APP)
 @State(name = "StructureDiffSettings", storages = @Storage("structureDiff.xml"))
 public final class StructureDiffSettings implements PersistentStateComponent<StructureDiffSettings.State> {
@@ -24,6 +27,17 @@ public final class StructureDiffSettings implements PersistentStateComponent<Str
 		/** Copied to the clipboard with the exported diff's path appended. */
 		public String skillCommand = DEFAULT_SKILL_COMMAND;
 		public boolean copyCommandToClipboard = true;
+		/** Which of the IDE's diagnostics are shown on the changed members of open files. */
+		public boolean showErrors = true;
+		public boolean showWarnings = false;
+		public boolean showWeakWarnings = false;
+	}
+
+	/** Application-level notification that the diagnostic levels shown changed. */
+	public interface DiagnosticLevelsListener {
+		Topic<DiagnosticLevelsListener> TOPIC = Topic.create("Structure Diff diagnostic levels", DiagnosticLevelsListener.class);
+
+		void levelsChanged();
 	}
 
 	private State state = new State();
@@ -44,6 +58,21 @@ public final class StructureDiffSettings implements PersistentStateComponent<Str
 
 	public boolean copyCommandToClipboard() {
 		return state.copyCommandToClipboard;
+	}
+
+	/** The diagnostic levels turned on; empty when none are shown. */
+	public Set<DiagnosticMembers.Level> diagnosticLevels() {
+		Set<DiagnosticMembers.Level> levels = EnumSet.noneOf(DiagnosticMembers.Level.class);
+		if (state.showErrors) {
+			levels.add(DiagnosticMembers.Level.ERROR);
+		}
+		if (state.showWarnings) {
+			levels.add(DiagnosticMembers.Level.WARNING);
+		}
+		if (state.showWeakWarnings) {
+			levels.add(DiagnosticMembers.Level.WEAK_WARNING);
+		}
+		return levels;
 	}
 
 	/** {@code dir} with {@code /} separators and no trailing one, or null unless it is a non-empty relative path within the root. */

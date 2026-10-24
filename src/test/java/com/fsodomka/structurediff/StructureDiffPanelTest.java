@@ -1,11 +1,16 @@
 package com.fsodomka.structurediff;
 
+import com.fsodomka.structurediff.DiagnosticMembers.MemberDiagnostic;
 import com.fsodomka.structurediff.review.FindingMembers.MemberFinding;
 import com.fsodomka.structurediff.review.ReviewSeverity;
+import com.intellij.icons.AllIcons;
+import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.vcs.FileStatus;
+import com.intellij.ui.RowIcon;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 
+import javax.swing.Icon;
 import javax.swing.tree.DefaultMutableTreeNode;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -74,7 +79,8 @@ public class StructureDiffPanelTest extends BasePlatformTestCase {
 		assertEquals(1, counts[ReviewSeverity.ERROR.ordinal()]);
 		assertEquals(2, counts[ReviewSeverity.WARNING.ordinal()]);
 		assertEquals(1, counts[ReviewSeverity.WEAK_WARNING.ordinal()]);
-		assertEquals(2, counts[counts.length - 1]);
+		// notShown.xml's findings are not counted
+		assertEquals(ReviewSeverity.values().length, counts.length);
 	}
 
 	public void testFindingsGoToTheInnermostShownMember() {
@@ -97,6 +103,54 @@ public class StructureDiffPanelTest extends BasePlatformTestCase {
 		assertEquals(List.of("inHiddenC"), titles(StructureDiffPanel.findingsOf(rootNode, findings)));
 		assertEquals(List.of("inHiddenChildOfA", "inA"), titles(StructureDiffPanel.findingsOf(aNode, findings)));
 		assertEquals(List.of("inB"), titles(StructureDiffPanel.findingsOf(bNode, findings)));
+	}
+
+	private static MemberDiagnostic diagnostic(HighlightSeverity severity, String message, String... keyPath) {
+		return new MemberDiagnostic(List.of(keyPath), message, severity, 0);
+	}
+
+	public void testDiagnosticsArePlacedAsFindings() {
+		DefaultMutableTreeNode fileNode = new DefaultMutableTreeNode(file("/p/a.xml"));
+		DefaultMutableTreeNode rootNode = add(fileNode, member("root"));
+		DefaultMutableTreeNode aNode = add(rootNode, member("a"));
+		Map<String, List<MemberDiagnostic>> diags = Map.of("/p/a.xml", List.of(
+				diagnostic(HighlightSeverity.ERROR, "inA", "root", "a"),
+				diagnostic(HighlightSeverity.WARNING, "inHidden", "root", "hidden"),
+				diagnostic(HighlightSeverity.WARNING, "outside")));
+
+		assertEquals(List.of("inA", "inHidden", "outside"),
+				StructureDiffPanel.placedOn(fileNode, diags, MemberDiagnostic::keyPath).stream().map(MemberDiagnostic::message).toList());
+		assertEquals(List.of("inHidden"),
+				StructureDiffPanel.placedOn(rootNode, diags, MemberDiagnostic::keyPath).stream().map(MemberDiagnostic::message).toList());
+		assertEquals(List.of("inA"),
+				StructureDiffPanel.placedOn(aNode, diags, MemberDiagnostic::keyPath).stream().map(MemberDiagnostic::message).toList());
+	}
+
+	public void testTooltipHasASectionPerSource() {
+		List<MemberDiagnostic> diags = new ArrayList<>();
+		for (int i = 0; i < StructureDiffPanel.MAX_TOOLTIP_DIAGNOSTICS + 2; i++) {
+			diags.add(diagnostic(HighlightSeverity.ERROR, "e" + i + " <x>"));
+		}
+
+		String html = StructureDiffPanel.withSignals("lines", List.of(finding("CRITICAL · f")), diags, true);
+
+		assertTrue(html, html.startsWith("<html>lines<br><br><b>Review</b><br>CRITICAL · f<br><b>IDE</b><br>Error · e0 &lt;x&gt;"));
+		assertTrue(html, html.contains("e4"));
+		assertFalse(html, html.contains("e5"));
+		assertTrue(html, html.contains("<br>and 2 more<br><i>Not analysed by the IDE"));
+		assertEquals("plain", StructureDiffPanel.withSignals("plain", List.of(), List.of(), false));
+		assertFalse(StructureDiffPanel.withSignals("t", List.of(), diags, false).contains("Review"));
+	}
+
+	public void testSignalIconsFollowTheNodeIconReviewFirst() {
+		Icon review = finding(ReviewSeverity.ERROR, "f").icon();
+		Icon ide = diagnostic(HighlightSeverity.WARNING, "w").icon();
+		assertEquals(AllIcons.Nodes.WarningIntroduction, ide);
+
+		RowIcon both = (RowIcon) StructureDiffPanel.withSignalIcons(AllIcons.Nodes.Class,
+				List.of(finding(ReviewSeverity.ERROR, "f")), List.of(diagnostic(HighlightSeverity.WARNING, "w")));
+		assertEquals(List.of(AllIcons.Nodes.Class, review, ide), both.getAllIcons());
+		assertSame(AllIcons.Nodes.Class, StructureDiffPanel.withSignalIcons(AllIcons.Nodes.Class, List.of(), List.of()));
 	}
 
 	public void testNoFindingsOutsideAFile() {
