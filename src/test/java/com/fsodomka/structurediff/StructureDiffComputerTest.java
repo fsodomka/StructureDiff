@@ -2,11 +2,11 @@ package com.fsodomka.structurediff;
 
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.vcs.FilePath;
-import com.intellij.openapi.vcs.FilePathImpl;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.SimpleContentRevision;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
+import com.intellij.vcsUtil.VcsUtil;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -27,9 +27,9 @@ public class StructureDiffComputerTest extends BasePlatformTestCase {
 	private static final String METHOD_KEY = "b(): void";
 
 	/** The members of {@code after}, compared to {@link #BEFORE}. */
-	@SuppressWarnings("deprecation") // FilePathImpl: the only FilePath without a VFS file, which the content revisions do not need
 	private FileDiff diff(String after) {
-		FilePath path = new FilePathImpl("/project/A.java", false);
+		// a local path without a VFS file, which the content revisions do not need
+		FilePath path = VcsUtil.getFilePath("/project/A.java", false);
 		Change change = new Change(new SimpleContentRevision(BEFORE, path, "1"), new SimpleContentRevision(after, path, "2"));
 		FileDiff loaded = StructureDiffComputer.load(change, new HashMap<>(), null);
 		return ReadAction.compute(() -> StructureDiffComputer.withMembers(getProject(), loaded));

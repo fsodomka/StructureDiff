@@ -11,7 +11,6 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.vcs.log.CommitId;
 import com.intellij.vcs.log.VcsLogCommitSelection;
 import com.intellij.vcs.log.VcsLogUi;
-import com.intellij.vcs.log.impl.VcsLogContentProvider;
 import com.intellij.vcs.log.impl.VcsLogManager;
 import com.intellij.vcs.log.impl.VcsProjectLog;
 import com.intellij.vcs.log.ui.MainVcsLogUi;
@@ -35,6 +34,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 final class CommitChangeSource implements ChangeSource, Disposable {
 	private static final Logger LOG = Logger.getInstance(CommitChangeSource.class);
+	/** VcsLogContentProvider.MAIN_LOG_ID of 2024.2, which later versions removed; see {@link #mainLogUi}. */
+	private static final String MAIN_LOG_ID = "MAIN";
 	/** getMainUi() of the log manager class, if it has one; see {@link #mainLogUi}. */
 	private static final ClassValue<Optional<Method>> GET_MAIN_UI = new ClassValue<>() {
 		@Override
@@ -162,7 +163,7 @@ final class CommitChangeSource implements ChangeSource, Disposable {
 		Method getMainUi = GET_MAIN_UI.get(manager.getClass()).orElse(null);
 		if (getMainUi == null) {
 			for (VcsLogUi ui : manager.getLogUis()) {
-				if (ui instanceof MainVcsLogUi main && VcsLogContentProvider.MAIN_LOG_ID.equals(ui.getId())) {
+				if (ui instanceof MainVcsLogUi main && MAIN_LOG_ID.equals(ui.getId())) {
 					return main;
 				}
 			}

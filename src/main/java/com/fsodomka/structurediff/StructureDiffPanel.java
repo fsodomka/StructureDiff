@@ -32,6 +32,7 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.openapi.ui.popup.Balloon;
@@ -1363,7 +1364,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				String path = relativePath(file.path(), basePath);
 				int slash = path.lastIndexOf('/');
 				List<MemberFinding> found = ghost ? List.of() : findingsOf(node);
-				setIcon(withFindingIcon(file.fileType().getIcon(), found));
+				setIcon(withFindingIcon(withTestMark(file.fileType().getIcon(), file.path()), found));
 				append(path.substring(slash + 1), attributes(restored ? FileStatus.NOT_CHANGED : file.status(), ghost && !restored, background));
 				if (file.members() != null && !ghost) {
 					int[] counts = new int[3];
@@ -1394,7 +1395,11 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			}
 			else if (item instanceof MemberDiff member) {
 				List<MemberFinding> found = ghost ? List.of() : findingsOf(node);
-				setIcon(withFindingIcon(member.icon(), found));
+				Icon icon = member.icon();
+				if (((DefaultMutableTreeNode) node.getParent()).getUserObject() instanceof FileDiff parent) {
+					icon = withTestMark(icon, parent.path());
+				}
+				setIcon(withFindingIcon(icon, found));
 				String shortLabel = shorten(member.label());
 				append(shortLabel, attributes(restored ? FileStatus.NOT_CHANGED : member.status(), ghost && !restored, background));
 				setToolTipText(withFindings(tooltip(member), found));
@@ -1424,6 +1429,15 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			}
 			return html.append("</html>").toString();
 		}
+		/** {@code icon} with the test marker when {@code path} is in test sources, as the Project view shows test classes. */
+		private Icon withTestMark(Icon icon, String path) {
+			VirtualFile file = LocalFileSystem.getInstance().findFileByPath(path);
+			if (icon == null || file == null || !ReadAction.compute(() -> ProjectFileIndex.getInstance(project).isInTestSourceContent(file))) {
+				return icon;
+			}
+			return IconManager.getInstance().createLayered(icon, AllIcons.Nodes.JunitTestMark);
+		}
+
 		/** {@code icon} followed by the icon of the most severe finding. */
 		private static Icon withFindingIcon(Icon icon, List<MemberFinding> found) {
 			if (found.isEmpty()) {

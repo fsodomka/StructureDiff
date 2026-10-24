@@ -78,8 +78,10 @@ public class BranchChangeSourceTest extends BasePlatformTestCase {
 		assertEquals(Change.Type.NEW, byName.get("Committed.txt").getType());
 		// committed 1 -> 2 on the branch, then 3 uncommitted: one change from the merge base
 		Change edited = byName.get("Edited.txt");
-		assertEquals("1\n", edited.getBeforeRevision().getContent());
-		assertEquals("3\n", edited.getAfterRevision().getContent());
+		// loading a Git revision is VCS I/O, which must not run on the EDT
+		List<String> contents = PlatformTestUtil.waitForFuture(ApplicationManager.getApplication().executeOnPooledThread(() ->
+				List.of(edited.getBeforeRevision().getContent(), edited.getAfterRevision().getContent())), TimeUnit.MINUTES.toMillis(1));
+		assertEquals(List.of("1\n", "3\n"), contents);
 		assertEquals(Change.Type.MODIFICATION, byName.get("Shared.txt").getType());
 		assertEquals("vs main", source.title());
 	}
