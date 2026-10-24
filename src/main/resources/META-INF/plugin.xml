@@ -28,6 +28,10 @@
         renames/moves, and old vs new signature in the tooltip. Multiple VCS roots are grouped.</li>
       <li><b>Double-click</b>/<b>Enter</b> jumps to source, <b>middle-click</b> opens the diff at the member;
         context menu: Show Diff, Jump to Source, Copy Path.</li>
+      <li><b>Show as Treemap</b> shows the changes as nested boxes sized by changed lines and colored by status
+        (removed members red). Click a box's header to zoom in, the breadcrumb or <b>Backspace</b> to zoom out; arrows
+        move between sibling boxes, <b>Enter</b> zooms in or jumps to source. Double-click, middle-click, the context
+        menu and finding icons work as in the tree.</li>
     </ul>
 
     <h3>Review Findings</h3>

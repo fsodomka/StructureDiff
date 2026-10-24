@@ -22,6 +22,10 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
   signature in the tooltip. Multiple VCS roots are grouped.
 - **Double-click**/**Enter** jumps to source, **middle-click** opens the diff at the member; context menu: Show Diff,
   Jump to Source, Copy Path.
+- **Show as Treemap** shows the changes as nested boxes sized by changed lines and colored by status (removed members
+  red). Click a box's header to zoom in, the breadcrumb or **Backspace** to zoom out; arrows move between sibling
+  boxes, **Enter** zooms in or jumps to source. Double-click, middle-click, the context menu and finding icons work as
+  in the tree.
 
 ## Review Findings
 
