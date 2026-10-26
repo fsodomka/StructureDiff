@@ -149,7 +149,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private final JScrollPane treeScroll = ScrollPaneFactory.createScrollPane(tree);
 	private final TreemapPanel treemap = new TreemapPanel(tree, StructureDiffPanel::speedSearchText,
 			node -> keyPart(node.getUserObject()), this::jumpToSource, this::openSelected,
-			this::findingsOf, this::showFindings, this::diagnosticsOf, this::notAnalysed, this::openDiagnostic, () -> this.loading, () -> tree.getEmptyText().getText());
+			this::findingsOf, this::showFindings, this::diagnosticsOf, this::notAnalysed, this::openDiagnostic, this::isTestFile, () -> this.loading, () -> tree.getEmptyText().getText());
 	/** A refresh is in progress, from the start until the first one finishes; shown by the treemap, the tree paints busy. */
 	private boolean loading = true;
 	/** Paths of the unversioned files in {@link #files}; they are loaded even when hidden, so the toggle needs no refresh. */
@@ -1070,6 +1070,11 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private boolean notAnalysed(DefaultMutableTreeNode node) {
 		return diagnostics != Diagnostics.NONE && node.getUserObject() instanceof FileDiff file
 				&& file.status() != FileStatus.DELETED && !diagnostics.analysed().contains(file.path());
+	}
+
+	/** Whether {@code node} is a changed file in test sources. */
+	private boolean isTestFile(DefaultMutableTreeNode node) {
+		return node.getUserObject() instanceof FileDiff file && testPaths.contains(file.path());
 	}
 
 	/** Opens the node's file at its most severe diagnostic. */

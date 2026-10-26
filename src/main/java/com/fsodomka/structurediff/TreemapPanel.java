@@ -2,6 +2,7 @@ package com.fsodomka.structurediff;
 
 import com.fsodomka.structurediff.DiagnosticMembers.MemberDiagnostic;
 import com.fsodomka.structurediff.review.FindingMembers.MemberFinding;
+import com.intellij.icons.AllIcons;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.ui.AnimatedIcon;
 import com.intellij.ui.ColorUtil;
@@ -27,6 +28,7 @@ import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Rectangle2D;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -55,6 +57,7 @@ final class TreemapPanel extends JComponent {
 	private final Function<DefaultMutableTreeNode, List<MemberFinding>> findings;
 	private final Function<DefaultMutableTreeNode, List<MemberDiagnostic>> diagnostics;
 	private final Predicate<DefaultMutableTreeNode> notAnalysed;
+	private final Predicate<DefaultMutableTreeNode> testFile;
 	private final BooleanSupplier loading;
 	private final Supplier<String> emptyText;
 	/** Painted rectangles, parents before their children; the last one containing a point is the deepest node there. */
@@ -92,6 +95,7 @@ final class TreemapPanel extends JComponent {
 	 * @param diagnostics the IDE's diagnostics shown on a node, most severe first
 	 * @param notAnalysed whether a node is a changed file the IDE has not analysed
 	 * @param onDiagnostic click on a diagnostic icon, like the tree's
+	 * @param testFile  whether a node is a file in test sources, marked like the tree's icon
 	 * @param loading   whether a refresh is in progress; the caller repaints when it changes
 	 * @param emptyText shown when there is nothing to show, like the tree's
 	 */
@@ -99,9 +103,10 @@ final class TreemapPanel extends JComponent {
 			Runnable onOpen, Runnable onDiff,
 			Function<DefaultMutableTreeNode, List<MemberFinding>> findings, Consumer<List<MemberFinding>> onFindings,
 			Function<DefaultMutableTreeNode, List<MemberDiagnostic>> diagnostics, Predicate<DefaultMutableTreeNode> notAnalysed,
-			Consumer<DefaultMutableTreeNode> onDiagnostic,
+			Consumer<DefaultMutableTreeNode> onDiagnostic, Predicate<DefaultMutableTreeNode> testFile,
 			BooleanSupplier loading, Supplier<String> emptyText) {
 		this.tree = tree;
+		this.testFile = testFile;
 		this.label = label;
 		this.key = key;
 		this.findings = findings;
@@ -557,12 +562,22 @@ final class TreemapPanel extends JComponent {
 		if (severity != null) {
 			iconWidth += paintCornerIcon(g, severity, r, header, pad, iconWidth, node, iconHits);
 		}
-		int labelWidth = r.width - 2 * pad - iconWidth;
+		boolean test = testFile.test(node);
+		// the test mark before the label, as on the tree's icon, when it fits beside the corner icons; it is an overlay
+		// whose glyph fills only a corner of the icon, so the glyph, not the icon, is placed and spaced like a character
+		Icon mark = AllIcons.Nodes.JunitTestMark;
+		Rectangle glyph = opaqueBounds(mark);
+		int markWidth = 0;
+		if (test && glyph != null && r.width >= iconWidth + glyph.width + 3 * pad && r.height >= header) {
+			mark.paintIcon(this, g, r.x + pad - glyph.x, r.y + (header - glyph.height) / 2 - glyph.y);
+			markWidth = glyph.width + pad;
+		}
+		int labelWidth = r.width - 2 * pad - iconWidth - markWidth;
 		String text = r.height >= metrics.getHeight() ? ellipsize(label.apply(node), metrics, labelWidth) : "";
 		if (!text.isEmpty()) {
 			g.setColor(color);
 			// a container's label is its header; a leaf's is centered in the box
-			int x = !node.isLeaf() ? r.x + pad : r.x + pad + (labelWidth - metrics.stringWidth(text)) / 2;
+			int x = markWidth + (!node.isLeaf() ? r.x + pad : r.x + pad + (labelWidth - metrics.stringWidth(text)) / 2);
 			int y = !node.isLeaf() ? r.y + pad / 2 + metrics.getAscent()
 					: r.y + (r.height - metrics.getHeight()) / 2 + metrics.getAscent();
 			g.drawString(text, x, y);
@@ -580,6 +595,29 @@ final class TreemapPanel extends JComponent {
 			g.drawRect(r.x + 1, r.y + 1, r.width - 2, r.height - 2);
 			g.setStroke(new BasicStroke());
 		}
+	}
+
+	/** The bounds of the painted pixels of {@code icon}, relative to its origin; null when it paints nothing. */
+	private Rectangle opaqueBounds(Icon icon) {
+		// a plain image in user space, which is what the bounds are in
+		BufferedImage image = new BufferedImage(icon.getIconWidth(), icon.getIconHeight(), BufferedImage.TYPE_INT_ARGB);
+		Graphics2D g = image.createGraphics();
+		try {
+			icon.paintIcon(this, g, 0, 0);
+		}
+		finally {
+			g.dispose();
+		}
+		Rectangle bounds = null;
+		for (int y = 0; y < image.getHeight(); y++) {
+			for (int x = 0; x < image.getWidth(); x++) {
+				if ((image.getRGB(x, y) >>> 24) != 0) {
+					Rectangle pixel = new Rectangle(x, y, 1, 1);
+					bounds = bounds == null ? pixel : bounds.union(pixel);
+				}
+			}
+		}
+		return bounds;
 	}
 
 	/** {@code text} cut to fit {@code width}, ending in "…"; empty when not even the first character and "…" fit. */
