@@ -8,6 +8,7 @@ import com.intellij.ui.AnimatedIcon;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.JBColor;
 import com.intellij.util.ui.GraphicsUtil;
+import com.intellij.util.ui.ImageUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 
@@ -140,7 +141,8 @@ final class TreemapPanel extends JComponent {
 		getActionMap().put("enter", new AbstractAction() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
-				DefaultMutableTreeNode selected = selectedHit() == null ? null : selectedHit().node();
+				Hit hit = selectedHit();
+				DefaultMutableTreeNode selected = hit == null ? null : hit.node();
 				if (selected == null) {
 					return;
 				}
@@ -289,7 +291,13 @@ final class TreemapPanel extends JComponent {
 		}
 		int[] lines = lines(node.getUserObject());
 		String text = label.apply(node);
-		return StructureDiffPanel.withSignals(lines == null ? text : text + "  +" + lines[0] + " −" + lines[1],
+		if (lines != null) {
+			// a side with no lines is left out, as in "+10" rather than "+10 −0"
+			String added = lines[0] > 0 ? "+" + lines[0] : "";
+			String removed = lines[1] > 0 ? "−" + lines[1] : "";
+			text += added.isEmpty() && removed.isEmpty() ? "" : "  " + (added.isEmpty() || removed.isEmpty() ? added + removed : added + " " + removed);
+		}
+		return StructureDiffPanel.withSignals(text,
 				findings.apply(node), diagnostics.apply(node), notAnalysed.test(node));
 	}
 
@@ -600,7 +608,7 @@ final class TreemapPanel extends JComponent {
 	/** The bounds of the painted pixels of {@code icon}, relative to its origin; null when it paints nothing. */
 	private Rectangle opaqueBounds(Icon icon) {
 		// a plain image in user space, which is what the bounds are in
-		BufferedImage image = new BufferedImage(icon.getIconWidth(), icon.getIconHeight(), BufferedImage.TYPE_INT_ARGB);
+		BufferedImage image = ImageUtil.createImage(icon.getIconWidth(), icon.getIconHeight(), BufferedImage.TYPE_INT_ARGB);
 		Graphics2D g = image.createGraphics();
 		try {
 			icon.paintIcon(this, g, 0, 0);

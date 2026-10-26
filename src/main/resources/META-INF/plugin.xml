@@ -27,11 +27,18 @@
       <li>Per file and member: <b>+</b> added, <b>~</b> modified, <b>&minus;</b> removed counts, changed lines,
         renames/moves, and old vs new signature in the tooltip. Multiple VCS roots are grouped.</li>
       <li><b>Double-click</b>/<b>Enter</b> jumps to source, <b>middle-click</b> opens the diff at the member;
-        context menu: Show Diff, Jump to Source, Copy Path.</li>
+        context menu: Show Diff, Jump to Source, Show Member History, Copy Path.</li>
       <li><b>Show as Treemap</b> shows the changes as nested boxes sized by changed lines and colored by status
         (removed members red). Click a box's header to zoom in, the breadcrumb or <b>Backspace</b> to zoom out; arrows
         move between sibling boxes, <b>Enter</b> zooms in or jumps to source. Double-click, middle-click, the context
         menu and finding icons work as in the tree.</li>
+    </ul>
+
+    <h3>Member History</h3>
+    <ul>
+      <li><b>Show Member History</b> in the editor or tree context menu lists the commits that changed one class,
+        method or field, newest first, following it across renames, signature changes and file renames, with a diff of the
+        member in the selected commit. Double-click shows the commit in the Git log.</li>
     </ul>
 
     <h3>Review Findings</h3>
@@ -57,12 +64,22 @@
                     factoryClass="com.fsodomka.structurediff.StructureDiffToolWindowFactory"/>
         <toolWindow id="Review Findings" anchor="bottom" icon="AllIcons.Actions.Preview"
                     factoryClass="com.fsodomka.structurediff.review.ReviewFindingsToolWindowFactory"/>
+        <toolWindow id="Member History" anchor="bottom" icon="AllIcons.Vcs.History" canCloseContents="true"
+                    factoryClass="com.fsodomka.structurediff.history.MemberHistoryToolWindowFactory"/>
         <postStartupActivity implementation="com.fsodomka.structurediff.review.ReviewFindingsStartup"/>
         <applicationService serviceImplementation="com.fsodomka.structurediff.StructureDiffSettings"/>
         <applicationConfigurable parentId="tools" instance="com.fsodomka.structurediff.StructureDiffConfigurable"
                                  id="com.fsodomka.structurediff.settings" displayName="Structure Diff"/>
         <notificationGroup id="Structure Diff" displayType="BALLOON"/>
     </extensions>
+
+    <actions>
+        <action id="StructureDiff.ShowMemberHistory" class="com.fsodomka.structurediff.history.ShowMemberHistoryAction"
+                text="Show Member History" description="Show the commits that changed the member at the caret"
+                icon="AllIcons.Vcs.History">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+    </actions>
 
     <projectListeners>
         <listener class="com.fsodomka.structurediff.review.ReviewFilesListener"

@@ -40,7 +40,7 @@ public class TreemapLayoutTest {
 		DefaultMutableTreeNode folder = new DefaultMutableTreeNode("folder");
 		// a member gives the containers above it a weight, so they are shown
 		DefaultMutableTreeNode leaf = new DefaultMutableTreeNode(
-				new MemberDiff("leaf", "leaf", "leaf", null, FileStatus.MODIFIED, 0, 0, 1, 1, true, 0, List.of()));
+				new MemberDiff("leaf", "leaf", "leaf", "leaf", null, FileStatus.MODIFIED, 0, 0, 1, 1, true, 0, List.of()));
 		root.add(repo);
 		repo.add(folder);
 		folder.add(leaf);
@@ -67,7 +67,7 @@ public class TreemapLayoutTest {
 
 	/** A member labelled "pom.xml" whatever its key, as siblings of the same name are. */
 	private static MemberDiff member(String key, boolean container) {
-		return new MemberDiff(key, "pom.xml", "pom.xml", null, FileStatus.MODIFIED, 0, 0, 1, 1, container, 0, List.of());
+		return new MemberDiff(key, key, "pom.xml", "pom.xml", null, FileStatus.MODIFIED, 0, 0, 1, 1, container, 0, List.of());
 	}
 
 	@Test
@@ -89,9 +89,9 @@ public class TreemapLayoutTest {
 	@Test
 	public void sizesGrowWithTheSquareRootOfChangedLines() {
 		DefaultMutableTreeNode small = new DefaultMutableTreeNode(
-				new MemberDiff("a", "a", "a", null, FileStatus.MODIFIED, 0, 0, 1, 3, false, 0, List.of()));
+				new MemberDiff("a", "a", "a", "a", null, FileStatus.MODIFIED, 0, 0, 1, 3, false, 0, List.of()));
 		DefaultMutableTreeNode large = new DefaultMutableTreeNode(
-				new MemberDiff("b", "b", "b", null, FileStatus.MODIFIED, 0, 0, 300, 100, false, 0, List.of()));
+				new MemberDiff("b", "b", "b", "b", null, FileStatus.MODIFIED, 0, 0, 300, 100, false, 0, List.of()));
 		assertEquals(2, TreemapPanel.weight(small), 1e-9);
 		assertEquals(20, TreemapPanel.weight(large), 1e-9);
 	}

@@ -2,6 +2,7 @@ package com.fsodomka.structurediff;
 
 import com.fsodomka.structurediff.DiagnosticMembers.Diagnostics;
 import com.fsodomka.structurediff.DiagnosticMembers.MemberDiagnostic;
+import com.fsodomka.structurediff.history.MemberHistoryToolWindowFactory;
 import com.fsodomka.structurediff.review.FindingMembers;
 import com.fsodomka.structurediff.review.FindingMembers.MemberFinding;
 import com.fsodomka.structurediff.review.ReviewFindingsListener;
@@ -61,6 +62,7 @@ import com.intellij.openapi.vcs.changes.ChangesUtil;
 import com.intellij.openapi.vcs.changes.ContentRevision;
 import com.intellij.openapi.vcs.changes.CurrentContentRevision;
 import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.*;
 import com.intellij.ui.awt.RelativePoint;
@@ -88,6 +90,9 @@ import java.awt.event.MouseEvent;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -156,6 +161,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private volatile Set<String> unversionedPaths = Set.of();
 	/** Paths of the files in test sources, marked as such in the tree; looked up off the EDT, as the index may be slow. */
 	private volatile Set<String> testPaths = Set.of();
+	/** Package of each file in a source root, relative to the package all changed code shares; shown instead of its directory. */
+	private Map<String, String> packages = Map.of();
 	/** Review findings by absolute file path, see {@link FindingMembers}; EDT only. */
 	private Map<String, List<MemberFinding>> findings = Map.of();
 	private final AtomicInteger findingsGeneration = new AtomicInteger();
@@ -464,6 +471,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		popup.add(treeAction("Revert Member", AllIcons.Actions.Rollback, null,
 				() -> source instanceof LocalChangeSource && selectedMember() != null && selectedWorkingFile() != null,
 				this::revertSelectedMember));
+		popup.add(treeAction("Show Member History", AllIcons.Vcs.History, null,
+				this::canShowSelectedMemberHistory, this::showSelectedMemberHistory));
 		popup.add(treeAction("Copy Path", AllIcons.Actions.Copy, null, () -> selectedFile() != null, () -> {
 			FileDiff file = selectedFile();
 			if (file == null) {
@@ -472,8 +481,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			CopyPasteManager.getInstance().setContents(new StringSelection(FileUtil.toSystemDependentName(file.path())));
 			return true;
 		}));
-		PopupHandler.installPopupMenu(tree, popup, "StructureDiffPopup");
-		PopupHandler.installPopupMenu(treemap, popup, "StructureDiffPopup");
+		PopupHandler.installPopupMenu(tree, popup, ActionPlaces.getPopupPlace("StructureDiffPopup"));
+		PopupHandler.installPopupMenu(treemap, popup, ActionPlaces.getPopupPlace("StructureDiffPopup"));
 	}
 
 	private DumbAwareAction treeAction(String text, Icon icon, String shortcutActionId, BooleanSupplier enabled,
@@ -569,6 +578,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 					ProjectFileIndex fileIndex = ProjectFileIndex.getInstance(project);
 					Map<String, VirtualFile> roots = new HashMap<>();
 					Set<String> tests = new HashSet<>();
+					Map<String, String> packages = new HashMap<>();
 					for (FileDiff file : loaded) {
 						VirtualFile virtualFile = LocalFileSystem.getInstance().findFileByPath(file.path());
 						if (virtualFile != null && fileIndex.isInTestSourceContent(virtualFile)) {
@@ -577,6 +587,22 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 						VirtualFile root = vcsManager.getVcsRootFor(ChangesUtil.getFilePath(file.change()));
 						if (root != null) {
 							roots.put(file.path(), root);
+						}
+						// the directory relative to its source root; PackageIndex would need the Java plugin
+						VirtualFile dir = virtualFile == null ? null : virtualFile.getParent();
+						VirtualFile sourceRoot = dir == null ? null : fileIndex.getSourceRootForFile(dir);
+						String packageName = sourceRoot == null ? null : VfsUtilCore.getRelativePath(dir, sourceRoot, '.');
+						if (packageName == null) {
+							// outside the project's source roots, e.g. another repository or an unmarked src/main/js
+							String path = root != null && file.path().startsWith(root.getPath() + "/")
+									? file.path().substring(root.getPath().length() + 1) : file.path();
+							packageName = conventionalPackage(path);
+							if (path.startsWith("src/test/") || path.contains("/src/test/")) {
+								tests.add(file.path());
+							}
+						}
+						if (packageName != null) {
+							packages.put(file.path(), packageName);
 						}
 					}
 					List<FileDiff> withMembers = new ArrayList<>(loaded.size());
@@ -588,7 +614,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 						}
 						withMembers.add(file);
 					}
-					return new Snapshot(withMembers, roots, unversioned.stream().map(FilePath::getPath).collect(Collectors.toSet()), tests);
+					return new Snapshot(withMembers, roots, unversioned.stream().map(FilePath::getPath).collect(Collectors.toSet()), tests,
+							relativePackages(packages, roots));
 				})
 				.inSmartMode(project)
 				.expireWith(this)
@@ -603,6 +630,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 						vcsRoots = snapshot.roots();
 						unversionedPaths = snapshot.unversioned();
 						testPaths = snapshot.tests();
+					packages = snapshot.packages();
 						show(snapshot.files(), highlight);
 						// the tree may show other members now, and edits may have moved the findings into other ones
 						updateFindings();
@@ -626,7 +654,70 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		}
 	}
 
-	private record Snapshot(List<FileDiff> files, Map<String, VirtualFile> roots, Set<String> unversioned, Set<String> tests) {
+	private static final Pattern CONVENTIONAL_SOURCE = Pattern.compile("(?:^|.*/)src/[^/]+/([^/]+)/(?:(.*)/)?[^/]+");
+	private static final Set<String> PACKAGE_LANGUAGES = Set.of("java", "kotlin", "scala", "groovy");
+
+	/**
+	 * The package of {@code path} below a Maven style {@code src/<set>/<language>/} directory, dotted for JVM languages,
+	 * else the directory below it; {@code null} when it is in no such directory.
+	 */
+	static String conventionalPackage(String path) {
+		Matcher matcher = CONVENTIONAL_SOURCE.matcher(path);
+		if (!matcher.matches()) {
+			return null;
+		}
+		String directory = StringUtil.notNullize(matcher.group(2));
+		return PACKAGE_LANGUAGES.contains(matcher.group(1)) ? directory.replace('/', '.') : directory;
+	}
+
+	/** {@link #relativePackages(Collection, Map, char)} per VCS root, first of dotted packages, then of directories. */
+	static Map<String, String> relativePackages(Map<String, String> packages, Map<String, VirtualFile> roots) {
+		Map<String, String> result = new HashMap<>(packages);
+		// a HashMap, as files outside any root have the null key
+		Map<VirtualFile, List<String>> byRoot = new HashMap<>();
+		packages.keySet().forEach(path -> byRoot.computeIfAbsent(roots.get(path), root -> new ArrayList<>()).add(path));
+		for (List<String> paths : byRoot.values()) {
+			relativePackages(paths, result, '.');
+			relativePackages(paths, result, '/');
+		}
+		return result;
+	}
+
+	/**
+	 * The {@code names} of {@code paths} without the package they all start with, {@code com.acme.app.ui -> ui}; only names
+	 * with a {@code separator} decide it, as a resource directory like {@code META-INF} is no code package, and keeps its name.
+	 */
+	static void relativePackages(Collection<String> paths, Map<String, String> names, char separator) {
+		String sep = String.valueOf(separator);
+		String common = null;
+		for (String path : paths) {
+			String name = names.get(path);
+			if (!name.contains(sep)) {
+				continue;
+			}
+			if (common == null) {
+				common = name;
+			}
+			while (!common.isEmpty() && !name.equals(common) && !name.startsWith(common + sep)) {
+				common = common.contains(sep) ? common.substring(0, common.lastIndexOf(separator)) : "";
+			}
+		}
+		if (common == null || common.isEmpty()) {
+			return;
+		}
+		for (String path : paths) {
+			String name = names.get(path);
+			if (name.equals(common)) {
+				names.put(path, "");
+			}
+			else if (name.startsWith(common + sep)) {
+				names.put(path, name.substring(common.length() + 1));
+			}
+		}
+	}
+
+	private record Snapshot(List<FileDiff> files, Map<String, VirtualFile> roots, Set<String> unversioned, Set<String> tests,
+							Map<String, String> packages) {
 	}
 
 	/** Group node of one VCS root. */
@@ -1203,6 +1294,13 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	}
 
 	private static String linesText(int added, int removed) {
+		// a side with no lines is left out, as in "10 lines added" rather than "10 lines added, 0 removed"
+		if (removed == 0) {
+			return added + (added == 1 ? " line" : " lines") + " added";
+		}
+		if (added == 0) {
+			return removed + (removed == 1 ? " line" : " lines") + " removed";
+		}
 		return added + " lines added, " + removed + " removed";
 	}
 
@@ -1537,6 +1635,31 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		return path;
 	}
 
+	/** A member that exists after the change, in a file that has an after revision. */
+	private boolean canShowSelectedMemberHistory() {
+		MemberDiff member = selectedMember();
+		FileDiff file = selectedFile();
+		if (member == null || member.afterOffset() < 0 || file == null || file.change().getAfterRevision() == null) {
+			return false;
+		}
+		// uncommitted: an added file or member is in no commit yet; the other modes show committed revisions
+		return !(source instanceof LocalChangeSource) || file.status() != FileStatus.ADDED && member.status() != FileStatus.ADDED;
+	}
+
+	/** Opens the commit history of the selected member, at the file's path after the change. */
+	private boolean showSelectedMemberHistory() {
+		FileDiff file = selectedFile();
+		ContentRevision after = file == null ? null : file.change().getAfterRevision();
+		List<MemberDiff> path = selectedMemberPath();
+		if (after == null || path.isEmpty()) {
+			return false;
+		}
+		// local changes are uncommitted: the after keys are working copy keys
+		MemberHistoryToolWindowFactory.show(project, after.getFile(), path.stream().map(MemberDiff::key).toList(),
+				source instanceof LocalChangeSource ? file.change() : null);
+		return true;
+	}
+
 	/** Replaces the selected member in the working file with its original version, as one undoable command. */
 	private boolean revertSelectedMember() {
 		VirtualFile workingFile = selectedWorkingFile();
@@ -1688,8 +1811,10 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				if (!found.isEmpty()) {
 					append("  ⚠" + found.size(), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES);
 				}
-				if (slash > 0) {
-					append("  " + path.substring(0, slash), SimpleTextAttributes.GRAYED_ATTRIBUTES);
+				// the package, as the source root and the package all changes share say little; the tooltip has the full path
+				String location = packages.getOrDefault(file.path(), slash > 0 ? path.substring(0, slash) : "");
+				if (!location.isEmpty()) {
+					append("  " + location, SimpleTextAttributes.GRAYED_ATTRIBUTES);
 				}
 				Change change = file.change();
 				String beforePath = change.getBeforeRevision() == null ? null : change.getBeforeRevision().getFile().getPath();
@@ -1701,8 +1826,14 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 					moved = (change.isMoved() ? "Moved from " : "Renamed from ") + FileUtil.toSystemDependentName(beforePath);
 				}
 				String lines = file.linesAdded() + file.linesRemoved() == 0 ? null : linesText(file.linesAdded(), file.linesRemoved());
-				setToolTipText(withSignals(moved == null ? lines : lines == null ? moved
-						: "<html>" + StringUtil.escapeXmlEntities(moved) + "<br>" + lines + "</html>", found, diags, !ghost && notAnalysed(node)));
+				StringBuilder tip = new StringBuilder("<html>").append(StringUtil.escapeXmlEntities(FileUtil.toSystemDependentName(path)));
+				if (moved != null) {
+					tip.append("<br>").append(StringUtil.escapeXmlEntities(moved));
+				}
+				if (lines != null) {
+					tip.append("<br>").append(lines);
+				}
+				setToolTipText(withSignals(tip.append("</html>").toString(), found, diags, !ghost && notAnalysed(node)));
 			}
 			else if (item instanceof MemberDiff member) {
 				List<MemberFinding> found = ghost ? List.of() : findingsOf(node);

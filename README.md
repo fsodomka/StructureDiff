@@ -21,11 +21,17 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
 - Per file and member: `+` added, `~` modified, `−` removed counts, changed lines, renames/moves, and old vs new
   signature in the tooltip. Multiple VCS roots are grouped.
 - **Double-click**/**Enter** jumps to source, **middle-click** opens the diff at the member; context menu: Show Diff,
-  Jump to Source, Copy Path.
+  Jump to Source, Show Member History, Copy Path.
 - **Show as Treemap** shows the changes as nested boxes sized by changed lines and colored by status (removed members
   red). Click a box's header to zoom in, the breadcrumb or **Backspace** to zoom out; arrows move between sibling
   boxes, **Enter** zooms in or jumps to source. Double-click, middle-click, the context menu and finding icons work as
   in the tree.
+
+## Member History
+
+- **Show Member History** in the editor or tree context menu lists the commits that changed one class, method or
+  field, newest first, following it across renames, signature changes and file renames, with a diff of the member in the
+  selected commit. Double-click shows the commit in the Git log.
 
 ## Review Findings
 
