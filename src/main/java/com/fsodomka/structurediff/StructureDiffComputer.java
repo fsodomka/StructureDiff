@@ -33,6 +33,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.Icon;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
@@ -100,7 +101,7 @@ public final class StructureDiffComputer {
 	 * Committed revisions are immutable, so their contents are taken from and added to {@code revisionCache}.
 	 * The line counts of {@code previous}, the last load of the file, are reused when its contents did not change.
 	 */
-	static FileDiff load(Change change, Map<String, String> revisionCache, @Nullable FileDiff previous) {
+	public static FileDiff load(Change change, Map<String, String> revisionCache, @Nullable FileDiff previous) {
 		return load(change, change.getFileStatus(), revisionCache, previous);
 	}
 
@@ -134,7 +135,8 @@ public final class StructureDiffComputer {
 		return revision.getFile().getPath() + "@" + revision.getRevisionNumber().asString();
 	}
 
-	private static String cachedContent(ContentRevision revision, Map<String, String> revisionCache) {
+	/** The revision's content, from {@code revisionCache} when it has a committed revision's; adds what it loads. */
+	public static String cachedContent(ContentRevision revision, Map<String, String> revisionCache) {
 		String key = revisionKey(revision);
 		if (key == null) {
 			return content(revision);
@@ -151,7 +153,7 @@ public final class StructureDiffComputer {
 	}
 
 	/** Adds the member diff; call inside a read action. A failing file is listed without members. */
-	static FileDiff withMembers(Project project, FileDiff file) {
+	public static FileDiff withMembers(Project project, FileDiff file) {
 		try {
 			return computeMembers(project, file);
 		}
@@ -243,18 +245,18 @@ public final class StructureDiffComputer {
 	}
 
 	/** One step of a path to a member: its key, else the first sibling with the same {@link #name}. */
-	record Step(String key, String name) {
+	public record Step(String key, String name) {
 	}
 
 	/** Text range of a member and its neighbor siblings, null at either end. */
-	record Located(TextRange range, @Nullable Step previous, @Nullable Step next) {
+	public record Located(TextRange range, @Nullable Step previous, @Nullable Step next) {
 	}
 
 	/**
 	 * The member at {@code path} in {@code text}, matched like {@link #currentOffset}; null when the file type has no
 	 * tree-based structure view or the member is not there. Call inside a read action.
 	 */
-	static @Nullable Located locate(Project project, String fileName, FileType fileType, CharSequence text, List<Step> path) {
+	public static @Nullable Located locate(Project project, String fileName, FileType fileType, CharSequence text, List<Step> path) {
 		return withStructure(project, fileName, fileType, text, null, (root, psi) -> {
 			TreeElement parent = find(root, psi, path.subList(0, path.size() - 1));
 			if (parent == null) {
@@ -444,6 +446,16 @@ public final class StructureDiffComputer {
 				beforeByKey.remove(b.key());
 			}
 		}
+		// a rename keeps the text but the name: pair the rest by that text, where only one member on each side has it
+		Map<String, List<Member>> removedByText = byTextWithoutName(beforeByKey.values());
+		Map<String, List<Member>> addedByText = byTextWithoutName(after.stream().filter(a -> !matched.containsKey(a)).toList());
+		removedByText.forEach((text, removed) -> {
+			List<Member> added = addedByText.get(text);
+			if (removed.size() == 1 && added != null && added.size() == 1) {
+				matched.put(added.getFirst(), removed.getFirst());
+				beforeByKey.remove(removed.getFirst().key());
+			}
+		});
 		List<MemberDiff> result = new ArrayList<>();
 		for (Member a : after) {
 			Member b = matched.get(a);
@@ -454,12 +466,23 @@ public final class StructureDiffComputer {
 			List<MemberDiff> children = diff(b.children(), a.children());
 			if (!children.isEmpty() || !a.normalizedText().equals(b.normalizedText()) || !a.label().equals(b.label())) {
 				int[] lines = changedLines(b.text(), a.text());
-				result.add(new MemberDiff(a.key(), a.label(), b.label(), a.icon(), FileStatus.MODIFIED, b.offset(), a.offset(),
+				result.add(new MemberDiff(a.key(), b.key(), a.label(), b.label(), a.icon(), FileStatus.MODIFIED, b.offset(), a.offset(),
 						lines[0], lines[1], a.container(), contentId(a), children));
 			}
 		}
 		for (Member b : beforeByKey.values()) {
 			result.add(whole(b, FileStatus.DELETED));
+		}
+		return result;
+	}
+
+	/** {@code members} by their normalized text with each one's own name blanked, including its uses, as in recursion. */
+	private static Map<String, List<Member>> byTextWithoutName(Collection<Member> members) {
+		Map<String, List<Member>> result = new LinkedHashMap<>();
+		for (Member m : members) {
+			// tokens are separated by single spaces, so the name is matched as a whole token
+			String text = (" " + m.normalizedText()).replace(" " + name(m.label()) + " ", " \0name ");
+			result.computeIfAbsent(text, t -> new ArrayList<>()).add(m);
 		}
 		return result;
 	}
@@ -480,7 +503,7 @@ public final class StructureDiffComputer {
 	}
 
 	/** Label without parameters and type: {@code foo(a: string): void} -> {@code foo}, {@code count: int} -> {@code count}. */
-	static String name(String label) {
+	public static String name(String label) {
 		int end = StringUtil.indexOfAny(label, "(:");
 		return end < 0 ? label : label.substring(0, end).trim();
 	}
@@ -489,7 +512,7 @@ public final class StructureDiffComputer {
 		List<MemberDiff> children = m.children().stream().map(c -> whole(c, status)).toList();
 		boolean added = status == FileStatus.ADDED;
 		int lines = StringUtil.countNewLines(m.text()) + 1;
-		return new MemberDiff(m.key(), m.label(), m.label(), m.icon(), status, added ? -1 : m.offset(), added ? m.offset() : -1,
+		return new MemberDiff(m.key(), m.key(), m.label(), m.label(), m.icon(), status, added ? -1 : m.offset(), added ? m.offset() : -1,
 				added ? lines : 0, added ? 0 : lines, m.container(), contentId(m), children);
 	}
 

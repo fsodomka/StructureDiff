@@ -21,7 +21,7 @@ import java.util.Set;
 
 public class StructureDiffPanelTest extends BasePlatformTestCase {
 	private static MemberDiff member(String key, FileStatus status, long changeId) {
-		return new MemberDiff(key, key, key, null, status, 0, 0, 1, 1, true, changeId, List.of());
+		return new MemberDiff(key, key, key, key, null, status, 0, 0, 1, 1, true, changeId, List.of());
 	}
 
 	private static MemberDiff member(String key, long changeId) {
@@ -147,9 +147,9 @@ public class StructureDiffPanelTest extends BasePlatformTestCase {
 		Icon ide = diagnostic(HighlightSeverity.WARNING, "w").icon();
 		assertEquals(AllIcons.Nodes.WarningIntroduction, ide);
 
-		RowIcon both = (RowIcon) StructureDiffPanel.withSignalIcons(AllIcons.Nodes.Class,
+		Icon both = StructureDiffPanel.withSignalIcons(AllIcons.Nodes.Class,
 				List.of(finding(ReviewSeverity.ERROR, "f")), List.of(diagnostic(HighlightSeverity.WARNING, "w")));
-		assertEquals(List.of(AllIcons.Nodes.Class, review, ide), both.getAllIcons());
+		assertEquals(List.of(AllIcons.Nodes.Class, review, ide), both instanceof RowIcon row ? row.getAllIcons() : both);
 		assertSame(AllIcons.Nodes.Class, StructureDiffPanel.withSignalIcons(AllIcons.Nodes.Class, List.of(), List.of()));
 	}
 
@@ -285,5 +285,36 @@ public class StructureDiffPanelTest extends BasePlatformTestCase {
 
 		assertEquals(Set.of(a), flashes.keySet());
 		assertSame(oldA.getUserObject(), flashes.get(a).vanished());
+	}
+
+	public void testRelativePackagesDropTheSharedPrefix() {
+		Map<String, String> relative = StructureDiffPanel.relativePackages(Map.of(
+				"a", "com.acme.app", "b", "com.acme.app.history", "c", "META-INF", "d", ""), Map.of());
+		assertEquals(Map.of("a", "", "b", "history", "c", "META-INF", "d", ""), relative);
+	}
+
+	public void testRelativePackagesOfUnrelatedPackagesKeepTheirNames() {
+		assertEquals(Map.of("a", "com.acme", "b", "org.other"),
+				StructureDiffPanel.relativePackages(Map.of("a", "com.acme", "b", "org.other"), Map.of()));
+	}
+
+	public void testRelativePackagesPerRootAndSeparator() throws IOException {
+		VirtualFile one = myFixture.getTempDirFixture().findOrCreateDir("one");
+		VirtualFile two = myFixture.getTempDirFixture().findOrCreateDir("two");
+		Map<String, String> relative = StructureDiffPanel.relativePackages(
+				Map.of("a", "com.acme.rest.model", "b", "com.acme.services", "c", "admin/basket", "d", "admin/converter",
+						"e", "org.other.impl", "f", "org.other.model.notebook"),
+				Map.of("a", one, "b", one, "c", one, "d", one, "e", two, "f", two));
+		assertEquals(Map.of("a", "rest.model", "b", "services", "c", "basket", "d", "converter",
+				"e", "impl", "f", "model.notebook"), relative);
+	}
+
+	public void testConventionalPackage() {
+		assertEquals("com.acme.impl", StructureDiffPanel.conventionalPackage("src/main/java/com/acme/impl/A.java"));
+		assertEquals("com.acme", StructureDiffPanel.conventionalPackage("lib/src/test/kotlin/com/acme/ATest.kt"));
+		assertEquals("admin/basket", StructureDiffPanel.conventionalPackage("src/main/js/admin/basket/edit.tsx"));
+		assertEquals("", StructureDiffPanel.conventionalPackage("src/main/js/index.ts"));
+		assertNull(StructureDiffPanel.conventionalPackage("templates/marimo.html"));
+		assertNull(StructureDiffPanel.conventionalPackage("README.md"));
 	}
 }

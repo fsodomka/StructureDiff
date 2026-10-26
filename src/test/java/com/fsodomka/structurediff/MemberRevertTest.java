@@ -19,7 +19,7 @@ public class MemberRevertTest extends BasePlatformTestCase {
 			""";
 
 	private static MemberDiff member(String label, FileStatus status) {
-		return new MemberDiff(label, label, label, null, status, 0, 0, 1, 1, false, 0, List.of());
+		return new MemberDiff(label, label, label, label, null, status, 0, 0, 1, 1, false, 0, List.of());
 	}
 
 	private String revert(String after, String current, FileStatus status, String method) {

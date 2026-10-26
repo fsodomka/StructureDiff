@@ -11,6 +11,8 @@ import com.intellij.vcsUtil.VcsUtil;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.Map;
+import java.util.TreeMap;
 
 /** The change id tells a member modified again from one that is unchanged since the previous refresh. */
 public class StructureDiffComputerTest extends BasePlatformTestCase {
@@ -28,9 +30,13 @@ public class StructureDiffComputerTest extends BasePlatformTestCase {
 
 	/** The members of {@code after}, compared to {@link #BEFORE}. */
 	private FileDiff diff(String after) {
+		return diff(BEFORE, after);
+	}
+
+	private FileDiff diff(String before, String after) {
 		// a local path without a VFS file, which the content revisions do not need
 		FilePath path = VcsUtil.getFilePath("/project/A.java", false);
-		Change change = new Change(new SimpleContentRevision(BEFORE, path, "1"), new SimpleContentRevision(after, path, "2"));
+		Change change = new Change(new SimpleContentRevision(before, path, "1"), new SimpleContentRevision(after, path, "2"));
 		FileDiff loaded = StructureDiffComputer.load(change, new HashMap<>(), null);
 		return ReadAction.compute(() -> StructureDiffComputer.withMembers(getProject(), loaded));
 	}
@@ -83,5 +89,60 @@ public class StructureDiffComputerTest extends BasePlatformTestCase {
 
 		assertTrue(first.afterOffset() != moved.afterOffset());
 		assertEquals(first.changeId(), moved.changeId());
+	}
+
+	/** A changed signature keeps the before key, which the member history continues with. */
+	public void testBeforeKeyOfAChangedSignature() {
+		MemberDiff changed = member(diff(BEFORE.replace("void b() {", "void b(int y) {")), "b(int): void");
+
+		assertEquals(METHOD_KEY, changed.beforeKey());
+		assertEquals(CLASS_KEY, member(diff(BEFORE.replace("int x = 1;", "int x = 2;")), CLASS_KEY).beforeKey());
+	}
+
+	/** The before key carries the {@code #n} of a repeated label, which the after key need not have. */
+	public void testBeforeKeyOfARepeatedLabel() {
+		String before = BEFORE.replace("void a() {}", "void c() {}\n\tvoid c() {}");
+		String after = BEFORE.replace("void a() {}", "void c() {}\n\tvoid c(int y) {}");
+
+		assertEquals("c(): void#2", member(diff(before, after), "c(int): void").beforeKey());
+	}
+
+	/** The status of each member of the class, by key; a renamed member is one modified member with its old key. */
+	private Map<String, String> statuses(String before, String after) {
+		Map<String, String> result = new TreeMap<>();
+		for (MemberDiff m : member(diff(before, after), CLASS_KEY).children()) {
+			result.put(m.key(), m.status().getId() + " " + m.beforeKey());
+		}
+		return result;
+	}
+
+	public void testRenameWithTheSameTextIsModified() {
+		MemberDiff renamed = member(diff(BEFORE.replace("void b() {", "void c() {")), "c(): void");
+
+		assertEquals(FileStatus.MODIFIED, renamed.status());
+		assertEquals(METHOD_KEY, renamed.beforeKey());
+		assertEquals("b(): void", renamed.beforeLabel());
+	}
+
+	/** A recursive call renamed with the method is part of the rename. */
+	public void testRenameOfARecursiveMethodIsModified() {
+		String before = BEFORE.replace("int x = 1;", "b();");
+		MemberDiff renamed = member(diff(before, before.replace("b()", "c()")), "c(): void");
+
+		assertEquals(METHOD_KEY, renamed.beforeKey());
+	}
+
+	public void testRenameWithABodyEditIsRemovedAndAdded() {
+		assertEquals(Map.of("b(): void", "DELETED b(): void", "c(): void", "ADDED c(): void"),
+				statuses(BEFORE, BEFORE.replace("void b() { int x = 1; }", "void c() { int x = 2; }")));
+	}
+
+	/** Two removed members with the same text: which one was renamed is unknown, so neither is paired. */
+	public void testAmbiguousRenameIsRemovedAndAdded() {
+		String before = BEFORE.replace("void a() {}", "void a() {}\n\tvoid d() {}");
+		String after = BEFORE.replace("void a() {}", "void e() {}");
+
+		assertEquals(Map.of("a(): void", "DELETED a(): void", "d(): void", "DELETED d(): void", "e(): void", "ADDED e(): void"),
+				statuses(before, after));
 	}
 }
