@@ -71,6 +71,7 @@
         <applicationConfigurable parentId="tools" instance="com.fsodomka.structurediff.StructureDiffConfigurable"
                                  id="com.fsodomka.structurediff.settings" displayName="Structure Diff"/>
         <notificationGroup id="Structure Diff" displayType="BALLOON"/>
+        <errorHandler implementation="com.intellij.diagnostic.JetBrainsMarketplaceErrorReportSubmitter"/>
     </extensions>
 
     <actions>

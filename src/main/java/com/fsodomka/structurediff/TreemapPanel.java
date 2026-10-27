@@ -598,8 +598,9 @@ final class TreemapPanel extends JComponent {
 			zoomHits.add(new Hit(rect, node));
 		}
 		if (tree.isPathSelected(new TreePath(node.getPath()))) {
-			g.setColor(JBUI.CurrentTheme.Focus.focusColor());
+			// neutral rather than the focus blue, which vanishes on modified boxes
 			g.setStroke(new BasicStroke(JBUI.scale(2)));
+			g.setColor(UIUtil.getLabelForeground());
 			g.drawRect(r.x + 1, r.y + 1, r.width - 2, r.height - 2);
 			g.setStroke(new BasicStroke());
 		}

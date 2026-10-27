@@ -1006,7 +1006,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				for (Path path : exported) {
 					VirtualFile file = LocalFileSystem.getInstance().findFileByNioFile(path);
 					if (file != null) {
-						editors.openFile(file, true);
+						new OpenFileDescriptor(project, file).navigate(true);
 						// shows the patch in the diff viewer; does nothing when the IDE has it disabled (registry enable.patch.file.diff.viewer)
 						editors.setSelectedEditor(file, PATCH_DIFF_EDITOR_TYPE);
 					}
@@ -1751,7 +1751,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 					|| processor.getActiveRequest().getUserData(OPENED_FILE_DIFF) != file) {
 				continue;
 			}
-			editors.openFile(diffEditor.getFile(), true);
+			new OpenFileDescriptor(project, diffEditor.getFile()).navigate(true);
 			if (scrollTo != null) {
 				if (processor.getActiveViewer() instanceof TwosideTextDiffViewer twoside) {
 					DiffUtil.scrollEditor(twoside.getEditor(scrollTo.first), scrollTo.second, false);
