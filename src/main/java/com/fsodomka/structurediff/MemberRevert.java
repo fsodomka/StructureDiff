@@ -36,7 +36,8 @@ final class MemberRevert {
 						  List<MemberDiff> path) {
 		MemberDiff member = path.getLast();
 		List<Step> afterPath = path.stream().map(m -> new Step(m.key(), StructureDiffComputer.name(m.label()))).toList();
-		List<Step> beforePath = path.stream().map(m -> new Step(m.key(), StructureDiffComputer.name(m.beforeLabel()))).toList();
+		// the before key: by name alone a changed signature would find the first overload
+		List<Step> beforePath = path.stream().map(m -> new Step(m.beforeKey(), StructureDiffComputer.name(m.beforeLabel()))).toList();
 		String before = StringUtil.notNullize(file.beforeText());
 		String after = StringUtil.notNullize(file.afterText());
 		Located now = StructureDiffComputer.locate(project, fileName, fileType, current, afterPath);
@@ -70,8 +71,10 @@ final class MemberRevert {
 		}
 		List<Step> beforeParent = beforePath.subList(0, beforePath.size() - 1);
 		List<Step> afterParent = afterPath.subList(0, afterPath.size() - 1);
+		// a neighbor is matched in the current text by key only: one whose signature changed would match an overload by
+		// name, and the member would land next to it; the other neighbor is tried instead
 		if (old.previous() != null) {
-			Located anchor = StructureDiffComputer.locate(project, fileName, fileType, current, with(afterParent, old.previous()));
+			Located anchor = StructureDiffComputer.locate(project, fileName, fileType, current, with(afterParent, byKey(old.previous())));
 			Located oldAnchor = StructureDiffComputer.locate(project, fileName, fileType, before, with(beforeParent, old.previous()));
 			if (anchor != null && oldAnchor != null) {
 				int at = anchor.range().getEndOffset();
@@ -79,7 +82,7 @@ final class MemberRevert {
 			}
 		}
 		if (old.next() != null) {
-			Located anchor = StructureDiffComputer.locate(project, fileName, fileType, current, with(afterParent, old.next()));
+			Located anchor = StructureDiffComputer.locate(project, fileName, fileType, current, with(afterParent, byKey(old.next())));
 			Located oldAnchor = StructureDiffComputer.locate(project, fileName, fileType, before, with(beforeParent, old.next()));
 			if (anchor != null && oldAnchor != null) {
 				int at = anchor.range().getStartOffset();
@@ -87,6 +90,14 @@ final class MemberRevert {
 			}
 		}
 		return Result.error("No neighbor of the removed member is left to place it next to.");
+	}
+
+	/**
+	 * {@code step} matched by its key only: its key as the name matches no sibling's name, which has no parameters, type
+	 * or {@code #n}, as in {@code MemberHistory.contains}.
+	 */
+	private static Step byKey(Step step) {
+		return new Step(step.key(), step.key());
 	}
 
 	private static List<Step> with(List<Step> parent, Step last) {

@@ -188,7 +188,11 @@ public class ReviewFindingsServiceTest extends BasePlatformTestCase {
 		assertTrue(service.reviews().isEmpty());
 
 		service.reload();
-		waitForLoad();
+		// reload loads after the asynchronous refresh of the reviews directory
+		long deadline = System.currentTimeMillis() + 10_000;
+		while (service.reviews().isEmpty() && System.currentTimeMillis() < deadline) {
+			waitForLoad();
+		}
 		assertEquals("20261015-120000-review.sarif", shownReview());
 		assertTrue(service.getState().cleared.isEmpty());
 	}

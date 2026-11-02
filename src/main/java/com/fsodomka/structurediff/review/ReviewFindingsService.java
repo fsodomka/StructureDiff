@@ -23,8 +23,10 @@ import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 import com.intellij.openapi.vcs.VcsRoot;
+import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.newvfs.RefreshQueue;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.util.concurrency.AppExecutorUtil;
@@ -192,10 +194,20 @@ public final class ReviewFindingsService implements PersistentStateComponent<Rev
 				.submit(AppExecutorUtil.getAppExecutorService());
 	}
 
-	/** Loads the newest review of each root again, also cleared ones. */
+	/**
+	 * Loads the newest review of each root again, also cleared ones. Reads the reviews directories from disk first: a
+	 * review written outside the IDE whose change the file watcher missed would otherwise load as the IDE last saw it.
+	 */
 	void reload() {
 		state.cleared.clear();
-		loadNewest();
+		VirtualFile[] dirs = roots().stream().map(ReviewFindingsService::reviewsDir).filter(Objects::nonNull).toArray(VirtualFile[]::new);
+		if (dirs.length == 0) {
+			loadNewest();
+			return;
+		}
+		// marked dirty, else the refresh trusts the watcher that missed the change
+		VfsUtil.markDirty(true, true, dirs);
+		RefreshQueue.getInstance().refresh(true, true, this::loadNewest, dirs);
 	}
 
 	/**

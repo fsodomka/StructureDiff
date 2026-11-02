@@ -39,6 +39,51 @@ public class MemberRevertTest extends BasePlatformTestCase {
 		assertEquals(BEFORE, revert(after, after, FileStatus.MODIFIED, "b"));
 	}
 
+	/** The before version is found by the member's before key, not by its name, which an overload shares. */
+	public void testRevertsChangedSignatureNextToOverload() {
+		String before = """
+				class A {
+					void b() {}
+
+					void b(int x) { int y = 1; }
+				}
+				""";
+		String after = before.replace("void b(int x)", "void b(int x, int z)");
+		FileDiff file = new FileDiff(null, "A.java", JavaFileType.INSTANCE, FileStatus.MODIFIED, before, after, 1, 1, null);
+		MemberDiff changed = new MemberDiff("b(int, int): void", "b(int): void", "b(int, int): void", "b(int): void", null,
+				FileStatus.MODIFIED, 0, 0, 1, 1, false, 0, List.of());
+		List<MemberDiff> path = List.of(member("A", FileStatus.MODIFIED), changed);
+		MemberRevert.Result result = ReadAction.compute(() ->
+				MemberRevert.compute(getProject(), file, "A.java", JavaFileType.INSTANCE, after, path));
+		assertNull(result.error());
+		MemberRevert.Edit edit = result.edit();
+		assertEquals(before, after.substring(0, edit.start()) + edit.text() + after.substring(edit.end()));
+	}
+
+	/** A neighbor whose signature changed is no anchor: by name it would be an overload elsewhere, so the other neighbor is. */
+	public void testRestoresRemovedMemberPastNeighborWithChangedSignature() {
+		String before = """
+				class A {
+					void b() {}
+
+					void b(int x) {}
+
+					void d() {}
+
+					void e() {}
+				}
+				""";
+		String after = before.replace("void b(int x)", "void b(int x, int z)").replace("\tvoid d() {}\n\n", "");
+		FileDiff file = new FileDiff(null, "A.java", JavaFileType.INSTANCE, FileStatus.MODIFIED, before, after, 1, 1, null);
+		List<MemberDiff> path = List.of(member("A", FileStatus.MODIFIED), member("d(): void", FileStatus.DELETED));
+		MemberRevert.Result result = ReadAction.compute(() ->
+				MemberRevert.compute(getProject(), file, "A.java", JavaFileType.INSTANCE, after, path));
+		assertNull(result.error());
+		MemberRevert.Edit edit = result.edit();
+		assertEquals(before.replace("void b(int x)", "void b(int x, int z)"),
+				after.substring(0, edit.start()) + edit.text() + after.substring(edit.end()));
+	}
+
 	public void testDeletesAddedMember() {
 		String after = BEFORE.replace("\tvoid c() {}\n", "\tvoid c() {}\n\n\tvoid d() {}\n");
 		assertEquals(BEFORE, revert(after, after, FileStatus.ADDED, "d"));
