@@ -119,6 +119,11 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	};
 	private final Alarm alarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, this);
 	private static final long FLASH_MILLIS = 4000;
+	/** How long a node that appeared takes to grow from its center to full size in the treemap. */
+	static final long GROW_MILLIS = 250;
+	/** The fade's frame time; a grow runs at {@link #GROW_FRAME_MILLIS}, as a few frames in a quarter second look choppy. */
+	private static final int FADE_FRAME_MILLIS = 50;
+	private static final int GROW_FRAME_MILLIS = 16;
 	/** The {@link FileDiff} a diff request was opened from, so a later open of the same file can reuse its tab. */
 	private static final Key<FileDiff> OPENED_FILE_DIFF = Key.create("structureDiff.openedFileDiff");
 	/**
@@ -130,7 +135,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private final Map<List<String>, Flash> flashes = new HashMap<>();
 	/** Whether a refresh result with {@link ChangeSource#highlightChanges()} was shown; it is the initial state, not changes to flash, even if a later one starts from an empty tree. */
 	private boolean baselineShown;
-	private final Timer fadeTimer = new Timer(50, e -> fadeStep());
+	private final Timer fadeTimer = new Timer(GROW_FRAME_MILLIS, e -> fadeStep());
 	private static final String SHOW_NESTED_KEY = "structureDiff.showNested";
 	private static final String SHOW_UNVERSIONED_KEY = "structureDiff.showUnversioned";
 	private static final String FLASH_CHANGES_KEY = "structureDiff.flashChanges";
@@ -154,7 +159,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private final JScrollPane treeScroll = ScrollPaneFactory.createScrollPane(tree);
 	private final TreemapPanel treemap = new TreemapPanel(tree, StructureDiffPanel::speedSearchText,
 			node -> keyPart(node.getUserObject()), this::jumpToSource, this::openSelected,
-			this::findingsOf, this::showFindings, this::diagnosticsOf, this::notAnalysed, this::openDiagnostic, this::isTestFile, () -> this.loading, () -> tree.getEmptyText().getText());
+			this::findingsOf, this::showFindings, this::diagnosticsOf, this::notAnalysed, this::openDiagnostic, this::isTestFile,
+			node -> flashes.isEmpty() ? null : flashes.get(keyOf(node)), () -> this.loading, () -> tree.getEmptyText().getText());
 	/** A refresh is in progress, from the start until the first one finishes; shown by the treemap, the tree paints busy. */
 	private boolean loading = true;
 	/** Paths of the unversioned files in {@link #files}; they are loaded even when hidden, so the toggle needs no refresh. */
@@ -331,10 +337,6 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				if (!source.hasUnversioned()) {
 					e.getPresentation().setEnabled(false);
 					e.getPresentation().setDescription("Commits have no member changes");
-				}
-				else if (showTreemap) {
-					e.getPresentation().setEnabled(false);
-					e.getPresentation().setDescription("The treemap does not flash changes");
 				}
 			}
 
@@ -737,9 +739,10 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	/**
 	 * A recent change of the node at a key. {@code vanished} is the user object of a node that disappeared,
 	 * shown at {@code index} of its parent until the flash ends; null for a node that appeared or changed.
+	 * {@code appeared} tells a node that was not there before, which grows in the treemap, from one that changed.
 	 * Package-private for the test of {@link #newFlashes}.
 	 */
-	record Flash(FileStatus status, Object vanished, int index, long start) {
+	record Flash(FileStatus status, boolean appeared, Object vanished, int index, long start) {
 		/** 1 for the first half of the flash, then fading to 0. */
 		double strength(long now) {
 			double remaining = 1 - (double) (now - start) / FLASH_MILLIS;
@@ -748,6 +751,15 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 
 		boolean expired(long now) {
 			return now - start >= FLASH_MILLIS;
+		}
+
+		/** The size of the node's box in the treemap, from 0 to 1, easing out over {@link #GROW_MILLIS}; 1 unless it appeared. */
+		double grown(long now) {
+			if (!appeared) {
+				return 1;
+			}
+			double t = Math.clamp((double) (now - start) / GROW_MILLIS, 0, 1);
+			return 1 - Math.pow(1 - t, 3);
 		}
 	}
 
@@ -762,11 +774,14 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		if (flashes.isEmpty()) {
 			fadeTimer.stop();
 		}
+		boolean growing = flashes.values().stream().anyMatch(f -> f.grown(now) < 1);
+		fadeTimer.setDelay(growing && showTreemap ? GROW_FRAME_MILLIS : FADE_FRAME_MILLIS);
 		if (ghostExpired) {
 			show(files, false);
 		}
 		else {
 			tree.repaint();
+			treemap.repaint();
 		}
 	}
 
@@ -1405,7 +1420,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			if (status != null && (statusChanged || !running.contains(key))
 					&& (old == null || changedSince(old.getUserObject(), node.getUserObject()))
 					&& (node.getUserObject() instanceof FileDiff || hadMembers(node, oldNodes))) {
-				result.put(key, new Flash(status, null, -1, now));
+				result.put(key, new Flash(status, old == null, null, -1, now));
 			}
 		});
 		oldNodes.forEach((key, node) -> {
@@ -1414,7 +1429,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			boolean parentRemains = key.size() == 2 || newNodes.containsKey(key.subList(0, key.size() - 1));
 			if (status != null && !newNodes.containsKey(key) && parentRemains
 					&& (node.getUserObject() instanceof FileDiff || hadMembers(node, newNodes))) {
-				result.put(key, new Flash(status, node.getUserObject(), node.getParent().getIndex(node), now));
+				result.put(key, new Flash(status, false, node.getUserObject(), node.getParent().getIndex(node), now));
 			}
 		});
 		return result;

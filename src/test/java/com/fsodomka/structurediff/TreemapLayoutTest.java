@@ -114,6 +114,14 @@ public class TreemapLayoutTest {
 	}
 
 	@Test
+	public void grownRectangleKeepsItsCenter() {
+		Rectangle2D rect = new Rectangle2D.Double(10, 20, 100, 40);
+		assertEquals(new Rectangle2D.Double(35, 30, 50, 20), TreemapPanel.scaled(rect, 0.5));
+		assertEquals(rect, TreemapPanel.scaled(rect, 1));
+		assertTrue(TreemapPanel.scaled(rect, 0).isEmpty());
+	}
+
+	@Test
 	public void noWeightsGiveNoRectangles() {
 		assertEquals(0, TreemapPanel.layout(new double[0], new Rectangle2D.Double(0, 0, 10, 10)).length);
 	}

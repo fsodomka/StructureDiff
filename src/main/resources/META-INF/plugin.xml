@@ -23,7 +23,8 @@
         <b>Settings | Tools | Structure Diff</b>.</li>
       <li>Toggles: <b>Show Nested Changes</b> (inside functions and object literals), <b>Show Unversioned Files</b> (except files directly in the
         repository root),
-        <b>Flash Changes</b> (briefly highlight what appeared, changed or disappeared).</li>
+        <b>Flash Changes</b> (briefly highlight what appeared, changed or disappeared; in the treemap, new boxes grow in
+        and removals are not shown).</li>
       <li>Per file and member: <b>+</b> added, <b>~</b> modified, <b>&minus;</b> removed counts, changed lines,
         renames/moves, and old vs new signature in the tooltip. Multiple VCS roots are grouped.</li>
       <li><b>Double-click</b>/<b>Enter</b> jumps to source, <b>middle-click</b> opens the diff at the member;

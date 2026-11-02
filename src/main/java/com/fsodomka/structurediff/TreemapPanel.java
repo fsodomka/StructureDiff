@@ -59,6 +59,7 @@ final class TreemapPanel extends JComponent {
 	private final Function<DefaultMutableTreeNode, List<MemberDiagnostic>> diagnostics;
 	private final Predicate<DefaultMutableTreeNode> notAnalysed;
 	private final Predicate<DefaultMutableTreeNode> testFile;
+	private final Function<DefaultMutableTreeNode, StructureDiffPanel.Flash> flash;
 	private final BooleanSupplier loading;
 	private final Supplier<String> emptyText;
 	/** Painted rectangles, parents before their children; the last one containing a point is the deepest node there. */
@@ -73,6 +74,9 @@ final class TreemapPanel extends JComponent {
 	private final List<Hit> crumbHits = new ArrayList<>();
 	/** Weights of the nodes painted, computed once per paint. */
 	private final Map<DefaultMutableTreeNode, Double> weights = new IdentityHashMap<>();
+	/** {@link #opaqueBounds} of the test mark, null when it paints nothing; computed on first use per look and feel. */
+	private Rectangle testMarkGlyph;
+	private boolean testMarkGlyphKnown;
 	/**
 	 * Keys of the zoomed node's path below the root, empty when not zoomed. Keys, not nodes, because every refresh
 	 * rebuilds the tree model.
@@ -97,6 +101,7 @@ final class TreemapPanel extends JComponent {
 	 * @param notAnalysed whether a node is a changed file the IDE has not analysed
 	 * @param onDiagnostic click on a diagnostic icon, like the tree's
 	 * @param testFile  whether a node is a file in test sources, marked like the tree's icon
+	 * @param flash     the node's running flash, or null; the caller repaints while flashes run
 	 * @param loading   whether a refresh is in progress; the caller repaints when it changes
 	 * @param emptyText shown when there is nothing to show, like the tree's
 	 */
@@ -105,9 +110,11 @@ final class TreemapPanel extends JComponent {
 			Function<DefaultMutableTreeNode, List<MemberFinding>> findings, Consumer<List<MemberFinding>> onFindings,
 			Function<DefaultMutableTreeNode, List<MemberDiagnostic>> diagnostics, Predicate<DefaultMutableTreeNode> notAnalysed,
 			Consumer<DefaultMutableTreeNode> onDiagnostic, Predicate<DefaultMutableTreeNode> testFile,
+			Function<DefaultMutableTreeNode, StructureDiffPanel.Flash> flash,
 			BooleanSupplier loading, Supplier<String> emptyText) {
 		this.tree = tree;
 		this.testFile = testFile;
+		this.flash = flash;
 		this.label = label;
 		this.key = key;
 		this.findings = findings;
@@ -536,6 +543,12 @@ final class TreemapPanel extends JComponent {
 	}
 
 	private void paintNode(Graphics2D g, DefaultMutableTreeNode node, Rectangle2D rect) {
+		// a node that appeared grows from its center, with its children laid out inside
+		StructureDiffPanel.Flash running = flash.apply(node);
+		long now = System.currentTimeMillis();
+		if (running != null) {
+			rect = scaled(rect, running.grown(now));
+		}
 		if (rect.getWidth() < 1 || rect.getHeight() < 1) {
 			return;
 		}
@@ -554,6 +567,15 @@ final class TreemapPanel extends JComponent {
 		int pad = JBUI.scale(3);
 		int header = metrics.getHeight() + pad;
 		boolean nested = !node.isLeaf() && r.width > 4 * pad && r.height > header + 3 * pad;
+		// under the label; a container showing its children flashes only its header, like its row in the tree, so a
+		// class changed through one method does not look as if all its methods changed. At full strength the color
+		// covers about half the background, a little more than the tree's flash, so the label in the same color stays
+		// readable.
+		double strength = running == null ? 0 : running.strength(now);
+		if (strength > 0) {
+			g.setColor(ColorUtil.withAlpha(color, (node.isLeaf() ? 0.25 : 0.4) * strength));
+			g.fill(nested ? new Rectangle(r.x, r.y, r.width, header) : r);
+		}
 		// the icons of the most severe finding and diagnostic, in the top right corner in the tree row's order; the
 		// diagnostic's only when both fit
 		List<MemberFinding> found = findings.apply(node);
@@ -574,7 +596,11 @@ final class TreemapPanel extends JComponent {
 		// the test mark before the label, as on the tree's icon, when it fits beside the corner icons; it is an overlay
 		// whose glyph fills only a corner of the icon, so the glyph, not the icon, is placed and spaced like a character
 		Icon mark = AllIcons.Nodes.JunitTestMark;
-		Rectangle glyph = opaqueBounds(mark);
+		if (test && !testMarkGlyphKnown) {
+			testMarkGlyph = opaqueBounds(mark);
+			testMarkGlyphKnown = true;
+		}
+		Rectangle glyph = testMarkGlyph;
 		int markWidth = 0;
 		if (test && glyph != null && r.width >= iconWidth + glyph.width + 3 * pad && r.height >= header) {
 			mark.paintIcon(this, g, r.x + pad - glyph.x, r.y + (header - glyph.height) / 2 - glyph.y);
@@ -604,6 +630,13 @@ final class TreemapPanel extends JComponent {
 			g.drawRect(r.x + 1, r.y + 1, r.width - 2, r.height - 2);
 			g.setStroke(new BasicStroke());
 		}
+	}
+
+	@Override
+	public void updateUI() {
+		super.updateUI();
+		// the icon may change with the theme or the scale
+		testMarkGlyphKnown = false;
 	}
 
 	/** The bounds of the painted pixels of {@code icon}, relative to its origin; null when it paints nothing. */
@@ -684,6 +717,13 @@ final class TreemapPanel extends JComponent {
 		}
 		// the square root, so a 1-line change next to a 500-line one is still a box, not a sliver
 		return Math.max(children, Math.max(1, Math.sqrt(lines[0] + lines[1])));
+	}
+
+	/** {@code rect} scaled by {@code scale} around its center. */
+	static Rectangle2D scaled(Rectangle2D rect, double scale) {
+		double width = rect.getWidth() * scale;
+		double height = rect.getHeight() * scale;
+		return new Rectangle2D.Double(rect.getCenterX() - width / 2, rect.getCenterY() - height / 2, width, height);
 	}
 
 	private static int[] lines(Object item) {

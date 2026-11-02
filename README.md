@@ -17,7 +17,8 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
   Diff**.
 - Toggles: **Show Nested Changes** (inside functions and object literals), **Show Unversioned Files** (except files
   directly in the repository root),
-  **Flash Changes** (briefly highlight what appeared, changed or disappeared).
+  **Flash Changes** (briefly highlight what appeared, changed or disappeared; in the treemap, new boxes grow in and
+  removals are not shown).
 - Per file and member: `+` added, `~` modified, `−` removed counts, changed lines, renames/moves, and old vs new
   signature in the tooltip. Multiple VCS roots are grouped.
 - **Double-click**/**Enter** jumps to source, **middle-click** opens the diff at the member; context menu: Show Diff,

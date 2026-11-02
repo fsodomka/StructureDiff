@@ -257,6 +257,28 @@ public class StructureDiffPanelTest extends BasePlatformTestCase {
 		assertEquals(Set.of(a, b), StructureDiffPanel.newFlashes(nodes(oldRoot), nodes(newRoot), Set.of(), 0).keySet());
 	}
 
+	/** A node that appeared grows in the treemap; one that only changed is shown at full size from the start. */
+	public void testAppearedNodeGrowsChangedNodeDoesNot() {
+		DefaultMutableTreeNode oldRoot = new DefaultMutableTreeNode();
+		DefaultMutableTreeNode oldA = add(add(oldRoot, file("/p/a.java")), member("a", 1));
+		DefaultMutableTreeNode newRoot = new DefaultMutableTreeNode();
+		DefaultMutableTreeNode newFile = add(newRoot, file("/p/a.java"));
+		add(newFile, member("a", 2));
+		List<String> b = StructureDiffPanel.keyOf(add(newFile, member("b", FileStatus.ADDED, 1)));
+		List<String> a = StructureDiffPanel.keyOf(oldA);
+
+		Map<List<String>, StructureDiffPanel.Flash> flashes =
+				StructureDiffPanel.newFlashes(nodes(oldRoot), nodes(newRoot), Set.of(), 100);
+
+		assertFalse(flashes.get(a).appeared());
+		assertEquals(1.0, flashes.get(a).grown(100));
+		assertTrue(flashes.get(b).appeared());
+		assertEquals(0.0, flashes.get(b).grown(100));
+		double halfway = flashes.get(b).grown(100 + StructureDiffPanel.GROW_MILLIS / 2);
+		assertTrue("eases out: past half at half time, " + halfway, halfway > 0.5 && halfway < 1);
+		assertEquals(1.0, flashes.get(b).grown(100 + StructureDiffPanel.GROW_MILLIS));
+	}
+
 	/** A status change updates a running flash instead of being skipped with the other content changes. */
 	public void testStatusChangeFlashesWhileItsNodeIsRunning() {
 		DefaultMutableTreeNode oldRoot = new DefaultMutableTreeNode();

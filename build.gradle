@@ -7,7 +7,7 @@ plugins {
 }
 
 group = 'com.fsodomka.structurediff'
-version = '2026.4.0'
+version = '2026.4.1'
 
 repositories {
     mavenCentral()
