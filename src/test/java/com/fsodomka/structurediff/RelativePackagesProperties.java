@@ -40,7 +40,7 @@ public class RelativePackagesProperties {
 				paths.add("p" + i);
 				names.put("p" + i, input.names.get(i));
 			}
-			StructureDiffPanel.relativePackages(paths, names, input.separator);
+			PackageNames.relativePackages(paths, names, input.separator);
 			List<String> actual = paths.stream().map(names::get).toList();
 			assertEquals(input.toString(), expected(input.names, input.separator), actual);
 		});

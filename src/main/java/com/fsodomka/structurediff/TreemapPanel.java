@@ -308,7 +308,7 @@ final class TreemapPanel extends JComponent {
 			String removed = lines[1] > 0 ? "−" + lines[1] : "";
 			text += added.isEmpty() && removed.isEmpty() ? "" : "  " + (added.isEmpty() || removed.isEmpty() ? added + removed : added + " " + removed);
 		}
-		return StructureDiffPanel.withSignals(text,
+		return MemberSignals.withSignals(text,
 				findings.apply(node), diagnostics.apply(node), notAnalysed.test(node));
 	}
 
