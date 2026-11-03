@@ -1,6 +1,6 @@
 package com.fsodomka.structurediff.review;
 
-import com.fsodomka.structurediff.StructureDiffComputer;
+import com.fsodomka.structurediff.MemberLocator;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -9,15 +9,8 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.Icon;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import javax.swing.*;
+import java.util.*;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
@@ -123,7 +116,7 @@ public final class FindingMembers {
 				found = cached.keyPaths();
 			}
 			else {
-				found = StructureDiffComputer.memberKeyPaths(project, first.file().getName(), first.file().getFileType(),
+				found = MemberLocator.memberKeyPaths(project, first.file().getName(), first.file().getFileType(),
 						first.text(), offsets);
 				cache.put(first.path(), new CachedKeyPaths(first.text(), offsets, found));
 			}

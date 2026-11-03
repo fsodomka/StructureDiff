@@ -18,7 +18,7 @@ public class TreemapLayoutTest {
 	public void areasAreProportionalAndFillTheBounds() {
 		double[] weights = {1, 6, 2, 3, 2, 6, 4};
 		Rectangle2D bounds = new Rectangle2D.Double(10, 20, 600, 400);
-		Rectangle2D[] rects = TreemapPanel.layout(weights, bounds);
+		Rectangle2D[] rects = TreemapLayout.layout(weights, bounds);
 		double area = 0;
 		for (int i = 0; i < weights.length; i++) {
 			Rectangle2D r = rects[i];
@@ -46,10 +46,10 @@ public class TreemapLayoutTest {
 		folder.add(leaf);
 		Function<DefaultMutableTreeNode, String> label =
 				node -> node.getUserObject() instanceof String text ? text : "leaf";
-		assertSame(folder, TreemapPanel.resolve(root, List.of("repo", "folder"), label, TreemapPanel::weight));
-		assertSame(repo, TreemapPanel.resolve(root, List.of("repo", "gone"), label, TreemapPanel::weight));
+		assertSame(folder, TreemapLayout.resolve(root, List.of("repo", "folder"), label, TreemapLayout::weight));
+		assertSame(repo, TreemapLayout.resolve(root, List.of("repo", "gone"), label, TreemapLayout::weight));
 		// a member is not a container to zoom into
-		assertSame(folder, TreemapPanel.resolve(root, List.of("repo", "folder", "leaf"), label, TreemapPanel::weight));
+		assertSame(folder, TreemapLayout.resolve(root, List.of("repo", "folder", "leaf"), label, TreemapLayout::weight));
 	}
 
 	@Test
@@ -62,7 +62,7 @@ public class TreemapLayoutTest {
 		root.add(first);
 		root.add(second);
 		Function<DefaultMutableTreeNode, String> key = node -> node.getUserObject() instanceof MemberDiff m ? m.key() : "";
-		assertSame(second, TreemapPanel.resolve(root, List.of("b/pom.xml"), key, TreemapPanel::weight));
+		assertSame(second, TreemapLayout.resolve(root, List.of("b/pom.xml"), key, TreemapLayout::weight));
 	}
 
 	/** A member labelled "pom.xml" whatever its key, as siblings of the same name are. */
@@ -79,11 +79,11 @@ public class TreemapLayoutTest {
 				return 10 * text.length();
 			}
 		};
-		assertEquals("method", TreemapPanel.ellipsize("method", metrics, 60));
-		assertEquals("meth…", TreemapPanel.ellipsize("method", metrics, 59));
-		assertEquals("met…", TreemapPanel.ellipsize("method", metrics, 49));
-		assertEquals("m…", TreemapPanel.ellipsize("method", metrics, 20));
-		assertEquals("", TreemapPanel.ellipsize("method", metrics, 19));
+		assertEquals("method", TreemapLayout.ellipsize("method", metrics, 60));
+		assertEquals("meth…", TreemapLayout.ellipsize("method", metrics, 59));
+		assertEquals("met…", TreemapLayout.ellipsize("method", metrics, 49));
+		assertEquals("m…", TreemapLayout.ellipsize("method", metrics, 20));
+		assertEquals("", TreemapLayout.ellipsize("method", metrics, 19));
 	}
 
 	@Test
@@ -92,8 +92,8 @@ public class TreemapLayoutTest {
 				new MemberDiff("a", "a", "a", "a", null, FileStatus.MODIFIED, 0, 0, 1, 3, false, 0, List.of()));
 		DefaultMutableTreeNode large = new DefaultMutableTreeNode(
 				new MemberDiff("b", "b", "b", "b", null, FileStatus.MODIFIED, 0, 0, 300, 100, false, 0, List.of()));
-		assertEquals(2, TreemapPanel.weight(small), 1e-9);
-		assertEquals(20, TreemapPanel.weight(large), 1e-9);
+		assertEquals(2, TreemapLayout.weight(small), 1e-9);
+		assertEquals(20, TreemapLayout.weight(large), 1e-9);
 	}
 
 	@Test
@@ -105,24 +105,24 @@ public class TreemapLayoutTest {
 		Rectangle2D bottomRight = new Rectangle2D.Double(10, 10, 10, 10);
 		Rectangle2D wide = new Rectangle2D.Double(0, 20, 20, 10);
 		List<Rectangle2D> all = List.of(topLeft, topRight, bottomLeft, bottomRight, wide);
-		assertEquals(1, TreemapPanel.neighbor(topLeft, all, TreemapPanel.RIGHT));
-		assertEquals(2, TreemapPanel.neighbor(topLeft, all, TreemapPanel.DOWN));
-		assertEquals(4, TreemapPanel.neighbor(bottomRight, all, TreemapPanel.DOWN));
-		assertEquals(1, TreemapPanel.neighbor(bottomRight, all, TreemapPanel.UP));
-		assertEquals(-1, TreemapPanel.neighbor(topLeft, all, TreemapPanel.LEFT));
-		assertEquals(-1, TreemapPanel.neighbor(topLeft, all, TreemapPanel.UP));
+		assertEquals(1, TreemapLayout.neighbor(topLeft, all, TreemapLayout.RIGHT));
+		assertEquals(2, TreemapLayout.neighbor(topLeft, all, TreemapLayout.DOWN));
+		assertEquals(4, TreemapLayout.neighbor(bottomRight, all, TreemapLayout.DOWN));
+		assertEquals(1, TreemapLayout.neighbor(bottomRight, all, TreemapLayout.UP));
+		assertEquals(-1, TreemapLayout.neighbor(topLeft, all, TreemapLayout.LEFT));
+		assertEquals(-1, TreemapLayout.neighbor(topLeft, all, TreemapLayout.UP));
 	}
 
 	@Test
 	public void grownRectangleKeepsItsCenter() {
 		Rectangle2D rect = new Rectangle2D.Double(10, 20, 100, 40);
-		assertEquals(new Rectangle2D.Double(35, 30, 50, 20), TreemapPanel.scaled(rect, 0.5));
-		assertEquals(rect, TreemapPanel.scaled(rect, 1));
-		assertTrue(TreemapPanel.scaled(rect, 0).isEmpty());
+		assertEquals(new Rectangle2D.Double(35, 30, 50, 20), TreemapLayout.scaled(rect, 0.5));
+		assertEquals(rect, TreemapLayout.scaled(rect, 1));
+		assertTrue(TreemapLayout.scaled(rect, 0).isEmpty());
 	}
 
 	@Test
 	public void noWeightsGiveNoRectangles() {
-		assertEquals(0, TreemapPanel.layout(new double[0], new Rectangle2D.Double(0, 0, 10, 10)).length);
+		assertEquals(0, TreemapLayout.layout(new double[0], new Rectangle2D.Double(0, 0, 10, 10)).length);
 	}
 }

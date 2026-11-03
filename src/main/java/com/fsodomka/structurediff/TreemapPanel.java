@@ -12,12 +12,7 @@ import com.intellij.util.ui.ImageUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 
-import javax.swing.AbstractAction;
-import javax.swing.Icon;
-import javax.swing.JComponent;
-import javax.swing.JTree;
-import javax.swing.KeyStroke;
-import javax.swing.SwingUtilities;
+import javax.swing.*;
 import javax.swing.event.TreeModelEvent;
 import javax.swing.event.TreeModelListener;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -31,17 +26,10 @@ import java.awt.event.MouseEvent;
 import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Consumer;
-import java.util.function.BooleanSupplier;
-import java.util.function.Function;
-import java.util.function.Predicate;
-import java.util.function.Supplier;
-import java.util.function.ToDoubleFunction;
+import java.util.function.*;
 
 /**
  * The nodes of a {@link JTree} as nested rectangles sized by their changed lines and colored by their status. Shares the
@@ -83,11 +71,6 @@ final class TreemapPanel extends JComponent {
 	 * rebuilds the tree model.
 	 */
 	private List<String> zoom = List.of();
-
-	static final int LEFT = 0;
-	static final int RIGHT = 1;
-	static final int UP = 2;
-	static final int DOWN = 3;
 
 	private record Hit(Rectangle2D rect, DefaultMutableTreeNode node) {
 	}
@@ -137,7 +120,7 @@ final class TreemapPanel extends JComponent {
 					return;
 				}
 				// from where the zoom is shown, which a refresh may have moved up
-				DefaultMutableTreeNode left = resolve(root, zoom, key, TreemapPanel::weight);
+				DefaultMutableTreeNode left = TreemapLayout.resolve(root, zoom, key, TreemapLayout::weight);
 				List<String> shown = pathKeys(left);
 				zoomTo(shown.isEmpty() ? shown : shown.subList(0, shown.size() - 1));
 				// the container just left stays selected, so the arrows go on from it
@@ -166,7 +149,7 @@ final class TreemapPanel extends JComponent {
 				DefaultMutableTreeNode largest = null;
 				for (int i = 0; i < selected.getChildCount(); i++) {
 					DefaultMutableTreeNode child = (DefaultMutableTreeNode) selected.getChildAt(i);
-					if (weight(child) > 0 && (largest == null || weight(child) > weight(largest))) {
+					if (TreemapLayout.weight(child) > 0 && (largest == null || TreemapLayout.weight(child) > TreemapLayout.weight(largest))) {
 						largest = child;
 					}
 				}
@@ -175,7 +158,7 @@ final class TreemapPanel extends JComponent {
 				}
 			}
 		});
-		int[][] arrows = {{KeyEvent.VK_LEFT, LEFT}, {KeyEvent.VK_RIGHT, RIGHT}, {KeyEvent.VK_UP, UP}, {KeyEvent.VK_DOWN, DOWN}};
+		int[][] arrows = {{KeyEvent.VK_LEFT, TreemapLayout.LEFT}, {KeyEvent.VK_RIGHT, TreemapLayout.RIGHT}, {KeyEvent.VK_UP, TreemapLayout.UP}, {KeyEvent.VK_DOWN, TreemapLayout.DOWN}};
 		for (int[] arrow : arrows) {
 			String name = "move" + arrow[1];
 			getInputMap().put(KeyStroke.getKeyStroke(arrow[0], 0), name);
@@ -300,7 +283,7 @@ final class TreemapPanel extends JComponent {
 		if (node == null) {
 			return null;
 		}
-		int[] lines = lines(node.getUserObject());
+		int[] lines = TreemapLayout.lines(node.getUserObject());
 		String text = label.apply(node);
 		if (lines != null) {
 			// a side with no lines is left out, as in "+10" rather than "+10 −0"
@@ -351,40 +334,10 @@ final class TreemapPanel extends JComponent {
 			return;
 		}
 		List<Hit> siblings = hits.stream().filter(hit -> hit.node().getParent() == from.node().getParent()).toList();
-		int next = neighbor(from.rect(), siblings.stream().map(Hit::rect).toList(), direction);
+		int next = TreemapLayout.neighbor(from.rect(), siblings.stream().map(Hit::rect).toList(), direction);
 		if (next >= 0) {
 			tree.setSelectionPath(new TreePath(siblings.get(next).node().getPath()));
 		}
-	}
-
-	/**
-	 * Index of the rectangle in {@code candidates} nearest to {@code from} in {@code direction}, by their centers, with a
-	 * sideways offset counting double so the move stays in line; -1 when there is none that way.
-	 */
-	static int neighbor(Rectangle2D from, List<Rectangle2D> candidates, int direction) {
-		int best = -1;
-		double bestScore = Double.MAX_VALUE;
-		for (int i = 0; i < candidates.size(); i++) {
-			Rectangle2D to = candidates.get(i);
-			double dx = to.getCenterX() - from.getCenterX();
-			double dy = to.getCenterY() - from.getCenterY();
-			double ahead = switch (direction) {
-				case LEFT -> -dx;
-				case RIGHT -> dx;
-				case UP -> -dy;
-				default -> dy;
-			};
-			double aside = direction == LEFT || direction == RIGHT ? Math.abs(dy) : Math.abs(dx);
-			if (ahead <= 0) {
-				continue;
-			}
-			double score = ahead + 2 * aside;
-			if (score < bestScore) {
-				bestScore = score;
-				best = i;
-			}
-		}
-		return best;
 	}
 
 	private void zoomTo(List<String> keys) {
@@ -399,29 +352,6 @@ final class TreemapPanel extends JComponent {
 			keys.addFirst(key.apply((DefaultMutableTreeNode) n));
 		}
 		return keys;
-	}
-
-	/**
-	 * The container at {@code keys} below {@code root}, or its deepest ancestor still there, for when a refresh
-	 * removed the zoomed node.
-	 */
-	static DefaultMutableTreeNode resolve(DefaultMutableTreeNode root, List<String> keys,
-			Function<DefaultMutableTreeNode, String> key, ToDoubleFunction<DefaultMutableTreeNode> weight) {
-		DefaultMutableTreeNode node = root;
-		for (String wanted : keys) {
-			DefaultMutableTreeNode next = null;
-			for (int i = 0; i < node.getChildCount() && next == null; i++) {
-				DefaultMutableTreeNode child = (DefaultMutableTreeNode) node.getChildAt(i);
-				if (wanted.equals(key.apply(child)) && weight.applyAsDouble(child) > 0) {
-					next = child;
-				}
-			}
-			if (next == null || next.isLeaf()) {
-				break;
-			}
-			node = next;
-		}
-		return node;
 	}
 
 	@Override
@@ -441,7 +371,7 @@ final class TreemapPanel extends JComponent {
 			DefaultMutableTreeNode root = (DefaultMutableTreeNode) tree.getModel().getRoot();
 			Rectangle2D bounds = new Rectangle2D.Double(0, 0, getWidth(), getHeight());
 			if (root != null && !zoom.isEmpty()) {
-				DefaultMutableTreeNode zoomed = resolve(root, zoom, key, this::cachedWeight);
+				DefaultMutableTreeNode zoomed = TreemapLayout.resolve(root, zoom, key, this::cachedWeight);
 				if (zoomed != root) {
 					int height = paintBreadcrumb(g2, zoomed);
 					bounds = new Rectangle2D.Double(0, height, getWidth(), getHeight() - height);
@@ -540,7 +470,7 @@ final class TreemapPanel extends JComponent {
 				children.add(child);
 			}
 		}
-		Rectangle2D[] rects = layout(children.stream().mapToDouble(this::cachedWeight).toArray(), bounds);
+		Rectangle2D[] rects = TreemapLayout.layout(children.stream().mapToDouble(this::cachedWeight).toArray(), bounds);
 		for (int i = 0; i < rects.length; i++) {
 			paintNode(g, children.get(i), rects[i]);
 		}
@@ -551,7 +481,7 @@ final class TreemapPanel extends JComponent {
 		ChangeFlashes.Flash running = flash.apply(node);
 		long now = System.currentTimeMillis();
 		if (running != null) {
-			rect = scaled(rect, running.grown(now));
+			rect = TreemapLayout.scaled(rect, running.grown(now));
 		}
 		if (rect.getWidth() < 1 || rect.getHeight() < 1) {
 			return;
@@ -618,7 +548,7 @@ final class TreemapPanel extends JComponent {
 			markWidth = glyph.width + pad;
 		}
 		int labelWidth = r.width - 2 * pad - iconWidth - markWidth;
-		String text = r.height >= metrics.getHeight() ? ellipsize(label.apply(node), metrics, labelWidth) : "";
+		String text = r.height >= metrics.getHeight() ? TreemapLayout.ellipsize(label.apply(node), metrics, labelWidth) : "";
 		if (!text.isEmpty()) {
 			g.setColor(color);
 			// a container's label is its header; a leaf's is centered in the box
@@ -673,76 +603,9 @@ final class TreemapPanel extends JComponent {
 		return bounds;
 	}
 
-	/** {@code text} cut to fit {@code width}, ending in "…"; empty when not even the first character and "…" fit. */
-	static String ellipsize(String text, FontMetrics metrics, int width) {
-		if (metrics.stringWidth(text) <= width) {
-			return text;
-		}
-		// the longest prefix that fits with the ellipsis
-		int low = 0;
-		int high = text.length();
-		while (low < high) {
-			int mid = (low + high + 1) / 2;
-			if (metrics.stringWidth(text.substring(0, mid) + "…") <= width) {
-				low = mid;
-			}
-			else {
-				high = mid - 1;
-			}
-		}
-		return low == 0 ? "" : text.substring(0, low) + "…";
-	}
-
-	/** {@link #weight} from this paint's cache, so each subtree is summed once. */
+	/** {@link TreemapLayout#weight} from this paint's cache, so each subtree is summed once. */
 	private double cachedWeight(DefaultMutableTreeNode node) {
-		return weight(node, weights);
-	}
-
-	/**
-	 * The square root of the node's changed lines, at least the sum of its children's; 0 for a vanished node, which
-	 * shows only in the tree.
-	 */
-	static double weight(DefaultMutableTreeNode node) {
-		return weight(node, new IdentityHashMap<>());
-	}
-
-	private static double weight(DefaultMutableTreeNode node, Map<DefaultMutableTreeNode, Double> cache) {
-		Double cached = cache.get(node);
-		if (cached != null) {
-			return cached;
-		}
-		double weight = uncachedWeight(node, cache);
-		cache.put(node, weight);
-		return weight;
-	}
-
-	private static double uncachedWeight(DefaultMutableTreeNode node, Map<DefaultMutableTreeNode, Double> cache) {
-		double children = 0;
-		for (int i = 0; i < node.getChildCount(); i++) {
-			children += weight((DefaultMutableTreeNode) node.getChildAt(i), cache);
-		}
-		int[] lines = lines(node.getUserObject());
-		if (lines == null) {
-			// the root, a repository, or a vanished node
-			return children;
-		}
-		// the square root, so a 1-line change next to a 500-line one is still a box, not a sliver
-		return Math.max(children, Math.max(1, Math.sqrt(lines[0] + lines[1])));
-	}
-
-	/** {@code rect} scaled by {@code scale} around its center. */
-	static Rectangle2D scaled(Rectangle2D rect, double scale) {
-		double width = rect.getWidth() * scale;
-		double height = rect.getHeight() * scale;
-		return new Rectangle2D.Double(rect.getCenterX() - width / 2, rect.getCenterY() - height / 2, width, height);
-	}
-
-	private static int[] lines(Object item) {
-		return switch (item) {
-			case FileDiff file -> new int[]{file.linesAdded(), file.linesRemoved()};
-			case MemberDiff member -> new int[]{member.linesAdded(), member.linesRemoved()};
-			case null, default -> null;
-		};
+		return TreemapLayout.weight(node, weights);
 	}
 
 	private static FileStatus status(Object item) {
@@ -753,78 +616,4 @@ final class TreemapPanel extends JComponent {
 		};
 	}
 
-	/**
-	 * Squarified treemap layout (Bruls, Huizing, van Wijk): rectangles filling {@code bounds} with areas proportional to
-	 * {@code weights} and aspect ratios close to 1. Returned in the order of {@code weights}.
-	 */
-	static Rectangle2D[] layout(double[] weights, Rectangle2D bounds) {
-		int n = weights.length;
-		Rectangle2D[] result = new Rectangle2D[n];
-		double total = Arrays.stream(weights).sum();
-		if (n == 0 || total <= 0) {
-			Arrays.setAll(result, i -> new Rectangle2D.Double(bounds.getX(), bounds.getY(), 0, 0));
-			return result;
-		}
-		// largest first, so the rows are filled with similar sizes
-		Integer[] order = new Integer[n];
-		Arrays.setAll(order, i -> i);
-		Arrays.sort(order, Comparator.comparingDouble((Integer i) -> weights[i]).reversed());
-		double scale = bounds.getWidth() * bounds.getHeight() / total;
-		double[] areas = new double[n];
-		for (int i = 0; i < n; i++) {
-			areas[i] = weights[order[i]] * scale;
-		}
-		double x = bounds.getX();
-		double y = bounds.getY();
-		double w = bounds.getWidth();
-		double h = bounds.getHeight();
-		int start = 0;
-		while (start < n) {
-			double side = Math.min(w, h);
-			int end = start + 1;
-			double rowArea = areas[start];
-			double worst = worst(areas, start, end, rowArea, side);
-			while (end < n) {
-				double next = worst(areas, start, end + 1, rowArea + areas[end], side);
-				if (next > worst) {
-					break;
-				}
-				rowArea += areas[end];
-				worst = next;
-				end++;
-			}
-			double thickness = side > 0 ? rowArea / side : 0;
-			double offset = 0;
-			for (int i = start; i < end; i++) {
-				double length = thickness > 0 ? areas[i] / thickness : 0;
-				// the row runs along the shorter side
-				result[order[i]] = w >= h
-						? new Rectangle2D.Double(x, y + offset, thickness, length)
-						: new Rectangle2D.Double(x + offset, y, length, thickness);
-				offset += length;
-			}
-			if (w >= h) {
-				x += thickness;
-				w -= thickness;
-			}
-			else {
-				y += thickness;
-				h -= thickness;
-			}
-			start = end;
-		}
-		return result;
-	}
-
-	/** The worst aspect ratio in the row of {@code areas[start, end)} laid along {@code side}. */
-	private static double worst(double[] areas, int start, int end, double rowArea, double side) {
-		double worst = 0;
-		for (int i = start; i < end; i++) {
-			double a = areas[i];
-			double s2 = side * side;
-			double r2 = rowArea * rowArea;
-			worst = Math.max(worst, Math.max(s2 * a / r2, r2 / (s2 * a)));
-		}
-		return worst;
-	}
 }

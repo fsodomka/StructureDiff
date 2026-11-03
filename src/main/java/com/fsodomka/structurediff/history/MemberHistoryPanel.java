@@ -1,8 +1,10 @@
 package com.fsodomka.structurediff.history;
 
+import com.fsodomka.structurediff.MemberLocator;
+import com.fsodomka.structurediff.MemberLocator.Located;
+import com.fsodomka.structurediff.MemberLocator.Step;
+import com.fsodomka.structurediff.RevisionContent;
 import com.fsodomka.structurediff.StructureDiffComputer;
-import com.fsodomka.structurediff.StructureDiffComputer.Located;
-import com.fsodomka.structurediff.StructureDiffComputer.Step;
 import com.fsodomka.structurediff.history.HistoryRow.Kind;
 import com.fsodomka.structurediff.history.MemberHistory.Batch;
 import com.intellij.diff.DiffContentFactory;
@@ -25,6 +27,7 @@ import com.intellij.openapi.progress.util.ProgressIndicatorBase;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectCloseListener;
+import com.intellij.openapi.ui.ThreeComponentsSplitter;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.AbstractVcs;
 import com.intellij.openapi.vcs.FilePath;
@@ -36,7 +39,6 @@ import com.intellij.openapi.vcs.history.VcsHistoryProvider;
 import com.intellij.openapi.vcs.history.VcsHistorySession;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.DoubleClickListener;
-import com.intellij.openapi.ui.ThreeComponentsSplitter;
 import com.intellij.ui.PopupHandler;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.components.JBLabel;
@@ -50,12 +52,8 @@ import com.intellij.vcsUtil.VcsUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.BorderFactory;
-import javax.swing.JButton;
-import javax.swing.JPanel;
-import javax.swing.JTable;
-import javax.swing.ListSelectionModel;
-import java.awt.BorderLayout;
+import javax.swing.*;
+import java.awt.*;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.List;
@@ -284,9 +282,9 @@ final class MemberHistoryPanel extends JPanel implements Disposable {
 	private String memberText(VcsFileRevision revision, List<String> keyPath) {
 		FilePath revisionPath = MemberHistory.path(revision, path);
 		String fileText = StringUtil.notNullize(
-				StructureDiffComputer.cachedContent(new MemberHistory.Revision(revision, revisionPath), contents));
+				RevisionContent.cachedContent(new MemberHistory.Revision(revision, revisionPath), contents));
 		List<Step> steps = keyPath.stream().map(key -> new Step(key, StructureDiffComputer.name(key))).toList();
-		Located located = MemberHistory.read(() -> StructureDiffComputer.locate(project, revisionPath.getName(),
+		Located located = MemberHistory.read(() -> MemberLocator.locate(project, revisionPath.getName(),
 				revisionPath.getFileType(), fileText, steps));
 		return located == null ? "" : located.range().substring(fileText);
 	}

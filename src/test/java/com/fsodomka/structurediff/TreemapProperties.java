@@ -16,11 +16,11 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Properties of {@link TreemapPanel#layout} and of arrow-key moves between its boxes with {@link TreemapPanel#neighbor},
+ * Properties of {@link TreemapLayout#layout} and of arrow-key moves between its boxes with {@link TreemapLayout#neighbor},
  * checked with jetCheck. Weights mix small and large values, so rows of similar and very different sizes both occur.
  */
 public class TreemapProperties {
-	private static final int[] DIRECTIONS = {TreemapPanel.LEFT, TreemapPanel.RIGHT, TreemapPanel.UP, TreemapPanel.DOWN};
+	private static final int[] DIRECTIONS = {TreemapLayout.LEFT, TreemapLayout.RIGHT, TreemapLayout.UP, TreemapLayout.DOWN};
 
 	private static final Generator<Integer> POSITIVE_WEIGHT = Generator.anyOf(Generator.integers(1, 10), Generator.integers(1, 100_000));
 	private static final Generator<Rectangle2D> BOUNDS = Generator.from(env -> new Rectangle2D.Double(
@@ -44,7 +44,7 @@ public class TreemapProperties {
 	public void boxesTileTheBoundsWithAreasProportionalToTheirWeights() {
 		// zero weights too, which the panel leaves out but layout accepts
 		forAll(layouts(Generator.anyOf(Generator.constant(0), POSITIVE_WEIGHT)), l -> {
-			Rectangle2D[] rects = TreemapPanel.layout(l.weights, l.bounds);
+			Rectangle2D[] rects = TreemapLayout.layout(l.weights, l.bounds);
 			assertEquals(l.weights.length, rects.length);
 			double boundsArea = l.bounds.getWidth() * l.bounds.getHeight();
 			double total = Arrays.stream(l.weights).sum();
@@ -75,7 +75,7 @@ public class TreemapProperties {
 			List<Rectangle2D> boxes = paintedBoxes(l);
 			for (Rectangle2D from : boxes) {
 				for (int direction : DIRECTIONS) {
-					int to = TreemapPanel.neighbor(from, boxes, direction);
+					int to = TreemapLayout.neighbor(from, boxes, direction);
 					if (to < 0) {
 						continue;
 					}
@@ -83,9 +83,9 @@ public class TreemapProperties {
 					double dx = target.getCenterX() - from.getCenterX();
 					double dy = target.getCenterY() - from.getCenterY();
 					double ahead = switch (direction) {
-						case TreemapPanel.LEFT -> -dx;
-						case TreemapPanel.RIGHT -> dx;
-						case TreemapPanel.UP -> -dy;
+						case TreemapLayout.LEFT -> -dx;
+						case TreemapLayout.RIGHT -> dx;
+						case TreemapLayout.UP -> -dy;
 						default -> dy;
 					};
 					assertTrue(from + " -> " + target + " in direction " + direction, ahead > 0);
@@ -105,7 +105,7 @@ public class TreemapProperties {
 				while (!queue.isEmpty()) {
 					Rectangle2D from = boxes.get(queue.poll());
 					for (int direction : DIRECTIONS) {
-						int to = TreemapPanel.neighbor(from, boxes, direction);
+						int to = TreemapLayout.neighbor(from, boxes, direction);
 						if (to >= 0 && !reached[to]) {
 							reached[to] = true;
 							queue.add(to);
@@ -122,6 +122,6 @@ public class TreemapProperties {
 
 	/** The boxes the panel paints and moves between: those at least a pixel wide and high. */
 	private static List<Rectangle2D> paintedBoxes(Layout l) {
-		return Arrays.stream(TreemapPanel.layout(l.weights, l.bounds)).filter(r -> r.getWidth() >= 1 && r.getHeight() >= 1).toList();
+		return Arrays.stream(TreemapLayout.layout(l.weights, l.bounds)).filter(r -> r.getWidth() >= 1 && r.getHeight() >= 1).toList();
 	}
 }

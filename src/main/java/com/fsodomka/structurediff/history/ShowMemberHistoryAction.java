@@ -1,6 +1,6 @@
 package com.fsodomka.structurediff.history;
 
-import com.fsodomka.structurediff.StructureDiffComputer;
+import com.fsodomka.structurediff.MemberLocator;
 import com.intellij.codeInsight.hint.HintManager;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
@@ -61,7 +61,7 @@ public final class ShowMemberHistoryAction extends AnAction {
 		CharSequence text = editor.getDocument().getImmutableCharSequence();
 		int offset = editor.getCaretModel().getOffset();
 		// parsing a large file can take long
-		ReadAction.nonBlocking(() -> StructureDiffComputer.memberKeyPaths(project, file.getName(), file.getFileType(), text,
+		ReadAction.nonBlocking(() -> MemberLocator.memberKeyPaths(project, file.getName(), file.getFileType(), text,
 						new int[]{offset}).getFirst())
 				.expireWhen(project::isDisposed)
 				.finishOnUiThread(ModalityState.defaultModalityState(), (List<String> keyPath) -> {

@@ -13,7 +13,7 @@ import static com.fsodomka.structurediff.PropertyChecks.forAll;
 import static org.junit.Assert.assertEquals;
 
 /**
- * Properties of {@link StructureDiffPanel#relativePackages(java.util.Collection, Map, char)}, checked with jetCheck against a
+ * Properties of {@link PackageNames#relativePackages(java.util.Collection, Map, char)}, checked with jetCheck against a
  * model working on whole segments. Names come from a few segments, so they often share a prefix of several segments, and
  * one name may be a prefix of another or the shared package itself.
  */

@@ -150,7 +150,7 @@ final class UsagesController {
 		}
 		usagesSearch = ReadAction.nonBlocking(() -> {
 					PsiFile psi = workingFile.isValid() ? PsiManager.getInstance(project).findFile(workingFile) : null;
-					PsiElement element = psi == null ? null : StructureDiffComputer.elements(psi, List.of(path)).getFirst();
+					PsiElement element = psi == null ? null : MemberLocator.elements(psi, List.of(path)).getFirst();
 					return element == null ? null : MemberLinks.links(project, element);
 				})
 				.inSmartMode(project)

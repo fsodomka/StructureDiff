@@ -1,6 +1,6 @@
 package com.fsodomka.structurediff;
 
-import com.fsodomka.structurediff.StructureDiffComputer.MemberPath;
+import com.fsodomka.structurediff.MemberLocator.MemberPath;
 import com.intellij.lang.Language;
 import com.intellij.lang.findUsages.EmptyFindUsagesProvider;
 import com.intellij.lang.findUsages.LanguageFindUsages;
@@ -18,7 +18,7 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.PsiTreeUtil;
 
-import javax.swing.Icon;
+import javax.swing.*;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -151,7 +151,7 @@ final class MemberLinks {
 			List<Ref> fileRefs = entry.getValue().stream().sorted(Comparator.comparingInt(Ref::offset)).toList();
 			PsiFile psi = file.isValid() ? PsiManager.getInstance(project).findFile(file) : null;
 			List<MemberPath> paths = psi == null ? Collections.nCopies(fileRefs.size(), MemberPath.NONE)
-					: StructureDiffComputer.memberPaths(psi, fileRefs.stream().mapToInt(Ref::offset).toArray());
+					: MemberLocator.memberPaths(psi, fileRefs.stream().mapToInt(Ref::offset).toArray());
 			Document document = psi == null ? null : PsiDocumentManager.getInstance(project).getDocument(psi);
 			Module module = ModuleUtilCore.findModuleForFile(file, project);
 			String moduleName = module == null ? "" : module.getName();

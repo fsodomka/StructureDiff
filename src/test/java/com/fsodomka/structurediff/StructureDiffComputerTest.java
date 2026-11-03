@@ -8,11 +8,7 @@ import com.intellij.openapi.vcs.changes.SimpleContentRevision;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 import com.intellij.vcsUtil.VcsUtil;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.TreeMap;
+import java.util.*;
 
 /** The change id tells a member modified again from one that is unchanged since the previous refresh. */
 public class StructureDiffComputerTest extends BasePlatformTestCase {
@@ -37,7 +33,7 @@ public class StructureDiffComputerTest extends BasePlatformTestCase {
 		// a local path without a VFS file, which the content revisions do not need
 		FilePath path = VcsUtil.getFilePath("/project/A.java", false);
 		Change change = new Change(new SimpleContentRevision(before, path, "1"), new SimpleContentRevision(after, path, "2"));
-		FileDiff loaded = StructureDiffComputer.load(change, new HashMap<>(), null);
+		FileDiff loaded = RevisionContent.load(change, new HashMap<>(), null);
 		return ReadAction.compute(() -> StructureDiffComputer.withMembers(getProject(), loaded));
 	}
 

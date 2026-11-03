@@ -1,14 +1,11 @@
 package com.fsodomka.structurediff.history;
 
-import com.fsodomka.structurediff.FileDiff;
-import com.fsodomka.structurediff.MemberDiff;
-import com.fsodomka.structurediff.StructureDiffComputer;
+import com.fsodomka.structurediff.*;
 import com.fsodomka.structurediff.history.HistoryRow.Kind;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.util.ProgressIndicatorUtils;
-import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.vcs.FilePath;
@@ -19,21 +16,16 @@ import com.intellij.openapi.vcs.changes.ContentRevision;
 import com.intellij.openapi.vcs.history.VcsFileRevision;
 import com.intellij.openapi.vcs.history.VcsFileRevisionEx;
 import com.intellij.openapi.vcs.history.VcsRevisionNumber;
+import com.intellij.util.concurrency.AppExecutorUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.HashMap;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.function.IntFunction;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 import java.util.function.Consumer;
+import java.util.function.IntFunction;
 
 /**
  * Walks the revisions of a file, newest first, and finds the commits that changed one member, following its key back
@@ -92,7 +84,7 @@ public final class MemberHistory {
 		IntFunction<Future<?>> prefetch = j -> {
 			for (int k = fromIndex + prefetched.size(); k < Math.min(end, j + PREFETCH_AHEAD + 1); k++) {
 				Revision revision = new Revision(revisions.get(k), path(revisions.get(k), currentPath));
-				prefetched.add(PREFETCH.submit(() -> StructureDiffComputer.cachedContent(revision, cache)));
+				prefetched.add(PREFETCH.submit(() -> RevisionContent.cachedContent(revision, cache)));
 			}
 			return j - fromIndex < prefetched.size() ? prefetched.get(j - fromIndex) : null;
 		};
@@ -129,7 +121,7 @@ public final class MemberHistory {
 			Change change = new Change(older == null ? null : new Revision(older, olderPath), new Revision(newer, newerPath));
 			await(prefetched.apply(i));
 			await(prefetched.apply(i + 1));
-			FileDiff loaded = StructureDiffComputer.load(change, cache, null);
+			FileDiff loaded = RevisionContent.load(change, cache, null);
 			if (loaded.afterText() == null || older != null && loaded.beforeText() == null) {
 				emit.accept(new HistoryRow(newer, older, Kind.END, "content unavailable", tracked, tracked));
 				return new Batch(rows, tracked, -1);
@@ -227,7 +219,7 @@ public final class MemberHistory {
 	 * so a member whose signature changed locally is found in the latest commit. Loads contents, so call off the EDT.
 	 */
 	public static List<String> committedKeyPath(Project project, Change localChange, List<String> keyPath) {
-		FileDiff loaded = StructureDiffComputer.load(localChange, new HashMap<>(), null);
+		FileDiff loaded = RevisionContent.load(localChange, new HashMap<>(), null);
 		if (loaded.beforeText() == null || loaded.afterText() == null) {
 			return keyPath;
 		}
@@ -241,11 +233,11 @@ public final class MemberHistory {
 	 */
 	private static boolean contains(Project project, FilePath path, String text, List<String> keyPath) {
 		// a step's name is compared to names, which have no parameters or #n, so the key itself matches no other sibling
-		List<StructureDiffComputer.Step> steps = keyPath.stream()
-				.map(key -> new StructureDiffComputer.Step(key, key))
+		List<MemberLocator.Step> steps = keyPath.stream()
+				.map(key -> new MemberLocator.Step(key, key))
 				.toList();
 		return read(() ->
-				StructureDiffComputer.locate(project, path.getName(), path.getFileType(), text, steps) != null);
+				MemberLocator.locate(project, path.getName(), path.getFileType(), text, steps) != null);
 	}
 
 	private static String paths(FilePath older, FilePath newer) {
@@ -281,7 +273,7 @@ public final class MemberHistory {
 		return List.copyOf(result);
 	}
 
-	/** A history revision as a content revision, so {@link StructureDiffComputer#cachedContent} and its cache can be reused. */
+	/** A history revision as a content revision, so {@link RevisionContent#cachedContent} and its cache can be reused. */
 	record Revision(VcsFileRevision revision, FilePath path) implements ContentRevision {
 		@Override
 		public @Nullable String getContent() throws VcsException {

@@ -1,7 +1,7 @@
 package com.fsodomka.structurediff;
 
-import com.fsodomka.structurediff.StructureDiffComputer.Located;
-import com.fsodomka.structurediff.StructureDiffComputer.Step;
+import com.fsodomka.structurediff.MemberLocator.Located;
+import com.fsodomka.structurediff.MemberLocator.Step;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
@@ -14,7 +14,7 @@ import java.util.List;
 
 /**
  * Computes the edit of the current text that reverts one member to its before version. Ranges come from parsing the
- * before text, the text the diff was computed from and the current text, like {@link StructureDiffComputer#currentOffset}.
+ * before text, the text the diff was computed from and the current text, like {@link MemberLocator#currentOffset}.
  */
 final class MemberRevert {
 	/** Replace {@code [start, end)} of the current text with {@code text}. */
@@ -40,18 +40,18 @@ final class MemberRevert {
 		List<Step> beforePath = path.stream().map(m -> new Step(m.beforeKey(), StructureDiffComputer.name(m.beforeLabel()))).toList();
 		String before = StringUtil.notNullize(file.beforeText());
 		String after = StringUtil.notNullize(file.afterText());
-		Located now = StructureDiffComputer.locate(project, fileName, fileType, current, afterPath);
+		Located now = MemberLocator.locate(project, fileName, fileType, current, afterPath);
 		if (member.status() == FileStatus.DELETED) {
 			return restore(project, fileName, fileType, before, current, now, beforePath, afterPath);
 		}
-		Located shown = StructureDiffComputer.locate(project, fileName, fileType, after, afterPath);
+		Located shown = MemberLocator.locate(project, fileName, fileType, after, afterPath);
 		if (now == null || shown == null || !now.range().subSequence(current).toString().equals(shown.range().substring(after))) {
 			return Result.error("The member changed since the last refresh. Refresh and try again.");
 		}
 		if (member.status() == FileStatus.ADDED) {
 			return new Result(deleteLines(current, now.range()), null);
 		}
-		Located old = StructureDiffComputer.locate(project, fileName, fileType, before, beforePath);
+		Located old = MemberLocator.locate(project, fileName, fileType, before, beforePath);
 		if (old == null) {
 			return Result.error("The member was not found in the original version.");
 		}
@@ -61,7 +61,7 @@ final class MemberRevert {
 	/** Inserts a removed member next to the surviving sibling that preceded it, else the one that followed it. */
 	private static Result restore(Project project, String fileName, FileType fileType, String before, CharSequence current,
 								  @Nullable Located now, List<Step> beforePath, List<Step> afterPath) {
-		Located old = StructureDiffComputer.locate(project, fileName, fileType, before, beforePath);
+		Located old = MemberLocator.locate(project, fileName, fileType, before, beforePath);
 		if (old == null) {
 			return Result.error("The member was not found in the original version.");
 		}
@@ -74,16 +74,16 @@ final class MemberRevert {
 		// a neighbor is matched in the current text by key only: one whose signature changed would match an overload by
 		// name, and the member would land next to it; the other neighbor is tried instead
 		if (old.previous() != null) {
-			Located anchor = StructureDiffComputer.locate(project, fileName, fileType, current, with(afterParent, byKey(old.previous())));
-			Located oldAnchor = StructureDiffComputer.locate(project, fileName, fileType, before, with(beforeParent, old.previous()));
+			Located anchor = MemberLocator.locate(project, fileName, fileType, current, with(afterParent, byKey(old.previous())));
+			Located oldAnchor = MemberLocator.locate(project, fileName, fileType, before, with(beforeParent, old.previous()));
 			if (anchor != null && oldAnchor != null) {
 				int at = anchor.range().getEndOffset();
 				return new Result(new Edit(at, at, before.substring(oldAnchor.range().getEndOffset(), old.range().getEndOffset())), null);
 			}
 		}
 		if (old.next() != null) {
-			Located anchor = StructureDiffComputer.locate(project, fileName, fileType, current, with(afterParent, byKey(old.next())));
-			Located oldAnchor = StructureDiffComputer.locate(project, fileName, fileType, before, with(beforeParent, old.next()));
+			Located anchor = MemberLocator.locate(project, fileName, fileType, current, with(afterParent, byKey(old.next())));
+			Located oldAnchor = MemberLocator.locate(project, fileName, fileType, before, with(beforeParent, old.next()));
 			if (anchor != null && oldAnchor != null) {
 				int at = anchor.range().getStartOffset();
 				return new Result(new Edit(at, at, before.substring(old.range().getStartOffset(), oldAnchor.range().getStartOffset())), null);

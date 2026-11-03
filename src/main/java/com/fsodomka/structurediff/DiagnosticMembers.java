@@ -124,7 +124,7 @@ final class DiagnosticMembers {
 			return cached.keyPaths();
 		}
 		try {
-			List<List<String>> found = StructureDiffComputer.memberKeyPaths(project, target.file().getName(),
+			List<List<String>> found = MemberLocator.memberKeyPaths(project, target.file().getName(),
 					target.file().getFileType(), target.text(), offsets);
 			cache.put(target.path(), new CachedKeyPaths(target.text(), offsets, found));
 			return found;
