@@ -43,6 +43,7 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.SimpleToolWindowPanel;
@@ -57,10 +58,21 @@ import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 import com.intellij.openapi.vcs.VcsException;
+import com.fsodomka.structurediff.MemberLinks.Link;
+import com.fsodomka.structurediff.MemberLinks.Links;
+import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangesUtil;
 import com.intellij.openapi.vcs.changes.ContentRevision;
 import com.intellij.openapi.vcs.changes.CurrentContentRevision;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
+import com.intellij.ui.JBColor;
+import com.intellij.ui.OnePixelSplitter;
+import org.jetbrains.concurrency.CancellablePromise;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -76,6 +88,8 @@ import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.StatusText;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.*;
 import javax.swing.Timer;
@@ -95,6 +109,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -140,6 +155,13 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private static final String SHOW_UNVERSIONED_KEY = "structureDiff.showUnversioned";
 	private static final String FLASH_CHANGES_KEY = "structureDiff.flashChanges";
 	private static final String SHOW_TREEMAP_KEY = "structureDiff.showTreemap";
+	private static final String SHOW_USAGES_KEY = "structureDiff.showUsages";
+	private static final Logger LOG = Logger.getInstance(StructureDiffPanel.class);
+	/**
+	 * Background of the changed members that use or are used by the selected one: soft amber, like the editor's search
+	 * result highlight, so it is not taken for the blue selection and sits well under the green, blue and grey status text.
+	 */
+	static final JBColor RELATED = new JBColor(0xFFEFC2, 0x6B5C1F);
 	/** Editor type id of the platform's internal DiffPatchFileEditorProvider, which shows a patch file in the diff viewer. */
 	private static final String PATCH_DIFF_EDITOR_TYPE = "DiffPatchFileEditorProvider";
 
@@ -157,10 +179,27 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private boolean flashChanges = PropertiesComponent.getInstance().getBoolean(FLASH_CHANGES_KEY, true);
 	private boolean showTreemap = PropertiesComponent.getInstance().getBoolean(SHOW_TREEMAP_KEY, false);
 	private final JScrollPane treeScroll = ScrollPaneFactory.createScrollPane(tree);
+	private boolean showUsages = PropertiesComponent.getInstance().getBoolean(SHOW_USAGES_KEY, false);
+	private final UsagesPanel usagesPanel;
+	/** The tree or treemap above the {@link #usagesPanel}; its proportion is saved under its key. */
+	private final OnePixelSplitter usagesSplitter = new OnePixelSplitter(true, "structureDiff.usagesProportion", 0.7f);
+	/** The key of the node whose usages are shown or searched; null when none is. */
+	private List<String> usagesKey;
+	/** The usages of {@link #usagesKey}; null while the first search runs or when there are none to show. */
+	private Links usages;
+	/** The {@link #contentStamp} of the files when {@link #usages} were searched; a different one searches again. */
+	private int usagesStamp;
+	/** The running search; null when none runs. */
+	private CancellablePromise<Links> usagesSearch;
+	private int usagesGeneration;
+	/** The changed members related to the selected one by {@link #usages}, painted with {@link #RELATED}; EDT only. */
+	private Set<DefaultMutableTreeNode> relatedNodes = Set.of();
+	/** Set while {@link #show} replaces the tree, whose selection events are not the user's. */
+	private boolean rebuilding;
 	private final TreemapPanel treemap = new TreemapPanel(tree, StructureDiffPanel::speedSearchText,
 			node -> keyPart(node.getUserObject()), this::jumpToSource, this::openSelected,
 			this::findingsOf, this::showFindings, this::diagnosticsOf, this::notAnalysed, this::openDiagnostic, this::isTestFile,
-			node -> flashes.isEmpty() ? null : flashes.get(keyOf(node)), () -> this.loading, () -> tree.getEmptyText().getText());
+			node -> flashes.isEmpty() ? null : flashes.get(keyOf(node)), node -> relatedNodes.contains(node), () -> this.loading, () -> tree.getEmptyText().getText());
 	/** A refresh is in progress, from the start until the first one finishes; shown by the treemap, the tree paints busy. */
 	private boolean loading = true;
 	/** Paths of the unversioned files in {@link #files}; they are loaded even when hidden, so the toggle needs no refresh. */
@@ -187,6 +226,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		super(true, true);
 		this.project = project;
 		this.source = source;
+		usagesPanel = new UsagesPanel(project, this::jumpToSource);
+		Disposer.register(this, usagesPanel);
 
 		tree.setRootVisible(false);
 		// "Nothing to show" only once the first refresh finished
@@ -231,7 +272,12 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		};
 		tree.addMouseListener(mouse);
 		tree.addMouseMotionListener(mouse);
-		setContent(showTreemap ? treemap : treeScroll);
+		updateContent();
+		tree.addTreeSelectionListener(e -> {
+			if (!rebuilding) {
+				updateUsages();
+			}
+		});
 		installPopupMenu();
 
 		// the treemap shows all levels, so there is nothing to expand or collapse
@@ -352,7 +398,32 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			public void setSelected(@NotNull AnActionEvent e, boolean state) {
 				showTreemap = state;
 				PropertiesComponent.getInstance().setValue(SHOW_TREEMAP_KEY, state, false);
-				setContent(state ? treemap : treeScroll);
+				updateContent();
+			}
+
+		});
+		group.add(new EdtToggleAction("Show Usages",
+				"Show what the selected member uses and what uses it, and highlight the related changed members",
+				AllIcons.Hierarchy.Supertypes) {
+			@Override
+			public boolean isSelected(@NotNull AnActionEvent e) {
+				return usagesShown();
+			}
+
+			@Override
+			public void setSelected(@NotNull AnActionEvent e, boolean state) {
+				showUsages = state;
+				PropertiesComponent.getInstance().setValue(SHOW_USAGES_KEY, state, false);
+				updateContent();
+			}
+
+			@Override
+			public void update(@NotNull AnActionEvent e) {
+				super.update(e);
+				if (source instanceof CommitChangeSource) {
+					e.getPresentation().setEnabled(false);
+					e.getPresentation().setDescription("Usages need the working-tree version of the files, not a commit's");
+				}
 			}
 
 		});
@@ -445,9 +516,13 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private void loadSettings() {
 		PropertiesComponent properties = PropertiesComponent.getInstance();
 		boolean savedTreemap = properties.getBoolean(SHOW_TREEMAP_KEY, false);
-		if (savedTreemap != showTreemap) {
+		boolean savedUsages = properties.getBoolean(SHOW_USAGES_KEY, false);
+		if (savedTreemap != showTreemap || savedUsages != showUsages) {
 			showTreemap = savedTreemap;
-			setContent(showTreemap ? treemap : treeScroll);
+			showUsages = savedUsages;
+			// later, not in the showing event: that comes from this panel's addNotify before its children's, so a child
+			// swapped in now is added twice, and a splitter's divider leaks the listener of the first
+			SwingUtilities.invokeLater(this::updateContent);
 		}
 		boolean savedNested = properties.getBoolean(SHOW_NESTED_KEY, false);
 		boolean savedUnversioned = properties.getBoolean(SHOW_UNVERSIONED_KEY, true);
@@ -726,6 +801,21 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	record RepoNode(VirtualFile root) {
 	}
 
+	/**
+	 * Whether files are grouped under {@link RepoNode}s: when any comes from a VCS root other than the project's own, which
+	 * includes files from several roots, so a change outside the project's repository always shows which repository it is in.
+	 * Without a {@code projectRoot}, when the project is in no repository, only when the files come from several roots.
+	 */
+	static boolean groupByRoot(Collection<VirtualFile> fileRoots, @Nullable VirtualFile projectRoot) {
+		return projectRoot == null ? fileRoots.stream().distinct().count() > 1 : fileRoots.stream().anyMatch(r -> !r.equals(projectRoot));
+	}
+
+	/** The VCS root holding the project's directory, which may be above it; null when it is in no repository. */
+	private @Nullable VirtualFile projectRoot() {
+		VirtualFile projectDir = ProjectUtil.guessProjectDir(project);
+		return projectDir == null ? null : ProjectLevelVcsManager.getInstance(project).getVcsRootFor(projectDir);
+	}
+
 	/** Reuses the members of a file whose contents did not change since the last refresh; parsing is the costly part. */
 	private FileDiff withMembers(Map<String, FileDiff> previous, FileDiff file) {
 		FileDiff old = previous.get(file.path());
@@ -785,6 +875,23 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		}
 	}
 
+	/** Shows {@code loadedFiles} as a refresh that loaded them does, without a change source or VCS. */
+	@TestOnly
+	void showLoaded(List<FileDiff> loadedFiles) {
+		files = loadedFiles;
+		show(loadedFiles, false);
+	}
+
+	@TestOnly
+	JTree tree() {
+		return tree;
+	}
+
+	@TestOnly
+	UsagesPanel usagesPanel() {
+		return usagesPanel;
+	}
+
 	/** @param highlightChanges flashes nodes that appeared, changed or disappeared since the previous tree */
 	private void show(List<FileDiff> loadedFiles, boolean highlightChanges) {
 		List<FileDiff> allFiles = shownFiles(loadedFiles);
@@ -803,7 +910,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		}
 
 		DefaultMutableTreeNode root = new DefaultMutableTreeNode();
-		boolean groupByRoot = allFiles.stream().map(f -> vcsRoots.get(f.path())).filter(Objects::nonNull).distinct().count() > 1;
+		boolean groupByRoot = groupByRoot(allFiles.stream().map(f -> vcsRoots.get(f.path())).filter(Objects::nonNull).toList(),
+				projectRoot());
 		Map<VirtualFile, DefaultMutableTreeNode> repoNodes = new LinkedHashMap<>();
 		int[] total = new int[3];
 		int linesAdded = 0;
@@ -842,24 +950,32 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		}
 		baselineShown |= highlightChanges;
 		insertGhosts(root, newNodes, repoNodes);
-		((DefaultTreeModel) tree.getModel()).setRoot(root);
-		Trees.expandAll(tree);
-		if (!firstShow) {
-			Trees.restoreCollapsed(tree, root, collapsed, StructureDiffPanel::keyPart, StructureDiffPanel::isFile);
-		}
 		if (flashes.isEmpty()) {
 			fadeTimer.stop();
 		}
 		else if (!fadeTimer.isRunning()) {
 			fadeTimer.start();
 		}
-		if (!selectedKeys.isEmpty()) {
-			List<TreePath> selectedPaths = selectedKeys.stream().map(key -> find(root, key)).filter(Objects::nonNull)
-					.map(node -> new TreePath(node.getPath())).toList();
-			if (!selectedPaths.isEmpty()) {
-				tree.setSelectionPaths(selectedPaths.toArray(TreePath[]::new));
+		rebuilding = true;
+		try {
+			((DefaultTreeModel) tree.getModel()).setRoot(root);
+			Trees.expandAll(tree);
+			if (!firstShow) {
+				Trees.restoreCollapsed(tree, root, collapsed, StructureDiffPanel::keyPart, StructureDiffPanel::isFile);
+			}
+			if (!selectedKeys.isEmpty()) {
+				List<TreePath> selectedPaths = selectedKeys.stream().map(key -> find(root, key)).filter(Objects::nonNull)
+						.map(node -> new TreePath(node.getPath())).toList();
+				if (!selectedPaths.isEmpty()) {
+					tree.setSelectionPaths(selectedPaths.toArray(TreePath[]::new));
+				}
 			}
 		}
+		finally {
+			// else an exception above would leave the selection listener ignoring the user for good
+			rebuilding = false;
+		}
+		updateUsages();
 		if (!started.isEmpty()) {
 			revealFlash(tree, started.keySet().stream().map(key -> find(root, key)).filter(Objects::nonNull)
 					.map(node -> new TreePath(node.getPath())).toList());
@@ -1642,12 +1758,188 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 
 	/** The selected member and its enclosing members, outermost first. */
 	private List<MemberDiff> selectedMemberPath() {
+		return memberPath(selectedNode());
+	}
+
+	/** The member of {@code node} and its enclosing members, outermost first; empty when it is no member. */
+	private static List<MemberDiff> memberPath(DefaultMutableTreeNode node) {
 		List<MemberDiff> path = new ArrayList<>();
-		for (DefaultMutableTreeNode node = selectedNode();
-			 node != null && node.getUserObject() instanceof MemberDiff pathMember; node = (DefaultMutableTreeNode) node.getParent()) {
+		for (; node != null && node.getUserObject() instanceof MemberDiff pathMember; node = (DefaultMutableTreeNode) node.getParent()) {
 			path.addFirst(pathMember);
 		}
 		return path;
+	}
+
+	/** Whether the {@link #usagesPanel} is shown: Show Usages is on, and the files are the working copy, not a commit's. */
+	private boolean usagesShown() {
+		return showUsages && !(source instanceof CommitChangeSource);
+	}
+
+	/** Shows the tree or the treemap, with the {@link #usagesPanel} below while {@link #usagesShown}. */
+	private void updateContent() {
+		JComponent main = showTreemap ? treemap : treeScroll;
+		if (!usagesShown()) {
+			usagesSplitter.setFirstComponent(null);
+			setContent(main);
+			cancelUsages();
+			return;
+		}
+		usagesSplitter.setFirstComponent(main);
+		usagesSplitter.setSecondComponent(usagesPanel);
+		setContent(usagesSplitter);
+		updateUsages();
+	}
+
+	/** Drops the shown usages and the highlight, cancelling a running search. */
+	private void cancelUsages() {
+		cancelUsagesSearch();
+		usagesKey = null;
+		setUsages(null);
+	}
+
+	/** Cancels a running search; its result is dropped even if it already finished and waits for the EDT. */
+	private void cancelUsagesSearch() {
+		if (usagesSearch != null) {
+			usagesSearch.cancel();
+			usagesSearch = null;
+		}
+		usagesGeneration++;
+	}
+
+	/** Sets {@link #usages} and highlights the members they relate in the current tree. */
+	private void setUsages(@Nullable Links links) {
+		usages = links;
+		Set<DefaultMutableTreeNode> related = links == null ? Set.of() : relatedNodes((DefaultMutableTreeNode) tree.getModel().getRoot(), links);
+		if (!related.equals(relatedNodes)) {
+			relatedNodes = related;
+			tree.repaint();
+			treemap.repaint();
+		}
+	}
+
+	/** Shows {@code message} in place of the usages, dropping the highlight. */
+	private void showUsagesMessage(String message) {
+		setUsages(null);
+		usagesPanel.showMessage(message);
+	}
+
+	/**
+	 * Stamp of the files' contents: when it differs from {@link #usagesStamp}, an edit may have changed the usages.
+	 * Cheap to recompute: a string caches its hash, and the texts of unchanged files are kept across refreshes.
+	 */
+	static int contentStamp(List<FileDiff> files) {
+		int stamp = 1;
+		for (FileDiff file : files) {
+			stamp = 31 * (31 * stamp + file.path().hashCode()) + Objects.hashCode(file.afterText());
+		}
+		return stamp;
+	}
+
+	/**
+	 * Searches the callers and callees of the selected member while Show Usages is on. When the same member is selected
+	 * after the tree was rebuilt, the shown usages are matched to the new nodes; they are searched again only when the
+	 * files changed or the last search found nothing, and stay shown until the new search replaces them.
+	 */
+	private void updateUsages() {
+		if (!usagesShown()) {
+			return;
+		}
+		DefaultMutableTreeNode node = selectedNode();
+		List<String> key = node == null ? null : keyOf(node);
+		int stamp = contentStamp(files);
+		boolean sameMember = key != null && key.equals(usagesKey);
+		if (sameMember) {
+			setUsages(usages);
+			if (stamp == usagesStamp && (usages != null || usagesSearch != null)) {
+				return;
+			}
+			cancelUsagesSearch();
+		}
+		else {
+			cancelUsages();
+			usagesKey = key;
+		}
+		usagesStamp = stamp;
+		if (node == null || !(node.getUserObject() instanceof MemberDiff member)) {
+			usagesPanel.clear();
+			return;
+		}
+		FileDiff file = Objects.requireNonNull(fileOf(node));
+		ContentRevision after = file.change().getAfterRevision();
+		if (after == null || member.afterOffset() < 0) {
+			showUsagesMessage("A removed member has no usages to look up");
+			return;
+		}
+		VirtualFile workingFile = after instanceof CurrentContentRevision current ? current.getVirtualFile() : null;
+		if (workingFile == null) {
+			showUsagesMessage("Usages need the working-tree version of this file");
+			return;
+		}
+		List<MemberDiff> path = memberPath(node);
+		int generation = usagesGeneration;
+		if (usages == null) {
+			usagesPanel.showBusy(member.label());
+		}
+		usagesSearch = ReadAction.nonBlocking(() -> {
+					PsiFile psi = workingFile.isValid() ? PsiManager.getInstance(project).findFile(workingFile) : null;
+					PsiElement element = psi == null ? null : StructureDiffComputer.elements(psi, List.of(path)).getFirst();
+					return element == null ? null : MemberLinks.links(project, element);
+				})
+				.inSmartMode(project)
+				.expireWith(this)
+				.finishOnUiThread(ModalityState.defaultModalityState(), links -> {
+					if (generation != usagesGeneration) {
+						return;
+					}
+					usagesSearch = null;
+					if (links == null) {
+						showUsagesMessage("Member not found in the working copy");
+						return;
+					}
+					setUsages(links);
+					usagesPanel.show(member.label(), links);
+				})
+				.submit(AppExecutorUtil.getAppExecutorService());
+		usagesSearch.onError(e -> {
+			if (e instanceof ProcessCanceledException || e instanceof CancellationException) {
+				return;
+			}
+			LOG.error("Usages could not be found", e);
+			UIUtil.invokeLaterIfNeeded(() -> {
+				if (generation == usagesGeneration) {
+					usagesSearch = null;
+					showUsagesMessage("Usages could not be found");
+				}
+			});
+		});
+	}
+
+	/**
+	 * The member nodes below {@code root} that hold {@code links}. A link to a member that is not in the tree highlights
+	 * the deepest code member on its path, which holds it as nested code (nested changes hidden, or an unchanged nested
+	 * member); not a class, whose unchanged members are not related to the class.
+	 */
+	static Set<DefaultMutableTreeNode> relatedNodes(DefaultMutableTreeNode root, Links links) {
+		Set<DefaultMutableTreeNode> result = new HashSet<>();
+		for (Link link : Stream.concat(links.callers().stream(), links.callees().stream()).toList()) {
+			DefaultMutableTreeNode node = child(root, link.file().getPath());
+			if (node == null || link.keys().isEmpty()) {
+				continue;
+			}
+			int matched = 0;
+			for (String part : link.keys()) {
+				DefaultMutableTreeNode next = child(node, part);
+				if (next == null) {
+					break;
+				}
+				node = next;
+				matched++;
+			}
+			if (matched == link.keys().size() || matched > 0 && node.getUserObject() instanceof MemberDiff member && !member.container()) {
+				result.add(node);
+			}
+		}
+		return result;
 	}
 
 	/** A member that exists after the change, in a file that has an after revision. */
@@ -1800,6 +2092,9 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			// a removed node that vanished came back (removal undone): it flashes as added, not as gone
 			boolean restored = ghost && flash != null && flash.status() == FileStatus.DELETED;
 			Color background = flash == null ? null : flashBackground(flash, ghost, restored);
+			if (background == null && !selected && relatedNodes.contains(node)) {
+				background = RELATED;
+			}
 			if (item instanceof RepoNode(VirtualFile root)) {
 				setIcon(AllIcons.Nodes.Module);
 				append(root.getName(), SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);

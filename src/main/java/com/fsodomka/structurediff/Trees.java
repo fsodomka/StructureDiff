@@ -112,12 +112,30 @@ public final class Trees {
 		}
 	}
 
-	/** Calls {@code open} on double-click and Enter; it returns whether it opened something, which consumes the event. */
+	/**
+	 * Calls {@code open} on double-click and Enter; it returns whether it opened something, which consumes the event.
+	 * A double-click folds or unfolds the node only when it opened nothing, so opening a class leaves it as it was.
+	 */
 	public static void installOpenHandler(JTree tree, BooleanSupplier open) {
+		// JTree toggles on the second press, before the click reaches the listener below
+		tree.setToggleClickCount(0);
 		new DoubleClickListener() {
 			@Override
 			protected boolean onDoubleClick(@NotNull MouseEvent event) {
-				return open.getAsBoolean();
+				if (open.getAsBoolean()) {
+					return true;
+				}
+				TreePath path = tree.getPathForLocation(event.getX(), event.getY());
+				if (path == null || tree.getModel().isLeaf(path.getLastPathComponent())) {
+					return false;
+				}
+				if (tree.isExpanded(path)) {
+					tree.collapsePath(path);
+				}
+				else {
+					tree.expandPath(path);
+				}
+				return true;
 			}
 		}.installOn(tree);
 		tree.addKeyListener(new KeyAdapter() {

@@ -217,7 +217,10 @@ public final class StructureDiffComputer {
 	 */
 	private static <T> T withStructure(Project project, String fileName, FileType fileType, CharSequence text, T fallback,
 									   BiFunction<TreeElement, PsiFile, T> function) {
-		PsiFile psi = PsiFileFactory.getInstance(project).createFileFromText(fileName, fileType, text);
+		return withStructure(PsiFileFactory.getInstance(project).createFileFromText(fileName, fileType, text), fallback, function);
+	}
+
+	private static <T> T withStructure(PsiFile psi, T fallback, BiFunction<TreeElement, PsiFile, T> function) {
 		StructureViewBuilder builder = LanguageStructureViewBuilder.getInstance().getStructureViewBuilder(psi);
 		if (!(builder instanceof TreeBasedStructureViewBuilder treeBuilder)) {
 			return fallback;
@@ -241,6 +244,25 @@ public final class StructureDiffComputer {
 		return withStructure(project, fileName, fileType, text, -1, (root, psi) -> {
 			PsiElement element = element(find(root, psi, steps));
 			return element == null ? -1 : element.getTextOffset();
+		});
+	}
+
+	/**
+	 * The elements of the members at {@code paths} in the project file {@code psi}, matched like {@link #currentOffset};
+	 * null where the member is not there, all null when the file type has no tree-based structure view. Unlike the other
+	 * lookups this uses the project's PSI, which resolves references. Call inside a read action.
+	 */
+	static List<PsiElement> elements(PsiFile psi, List<List<MemberDiff>> paths) {
+		List<PsiElement> none = Collections.nCopies(paths.size(), null);
+		if (psi.getTextLength() > MAX_STRUCTURE_LENGTH) {
+			return none;
+		}
+		return withStructure(psi, none, (root, file) -> {
+			// shared by the paths: building a parent's children computes all their labels, slow for a large class
+			Map<TreeElement, Map<String, TreeElement>> children = new IdentityHashMap<>();
+			return paths.stream()
+					.map(path -> element(find(root, file, path.stream().map(m -> new Step(m.key(), name(m.label()))).toList(), children)))
+					.toList();
 		});
 	}
 
@@ -289,12 +311,18 @@ public final class StructureDiffComputer {
 
 	/** The member at {@code path} below {@code root}; null when {@code root} is null or the member is not there. */
 	private static @Nullable TreeElement find(@Nullable TreeElement root, PsiFile psi, List<Step> path) {
+		return find(root, psi, path, new IdentityHashMap<>());
+	}
+
+	/** As {@link #find(TreeElement, PsiFile, List)}, taking and adding the keyed children of each parent from {@code cache}. */
+	private static @Nullable TreeElement find(@Nullable TreeElement root, PsiFile psi, List<Step> path,
+											  Map<TreeElement, Map<String, TreeElement>> cache) {
 		TreeElement current = root;
 		for (Step step : path) {
 			if (current == null) {
 				return null;
 			}
-			Map<String, TreeElement> children = keyedChildren(current, psi);
+			Map<String, TreeElement> children = cache.computeIfAbsent(current, parent -> keyedChildren(parent, psi));
 			current = children.get(step.key());
 			if (current == null) {
 				current = children.values().stream()
@@ -316,28 +344,55 @@ public final class StructureDiffComputer {
 		if (text.length() > MAX_STRUCTURE_LENGTH) {
 			return none;
 		}
-		return withStructure(project, fileName, fileType, text, none, (root, psi) -> {
-			List<List<String>> result = new ArrayList<>(offsets.length);
-			for (int offset : offsets) {
-				List<String> path = new ArrayList<>();
-				TreeElement current = root;
-				while (current != null) {
-					TreeElement enclosing = null;
-					for (Map.Entry<String, TreeElement> entry : keyedChildren(current, psi).entrySet()) {
-						PsiElement element = element(entry.getValue());
-						if (element != null && element.getTextRange().getStartOffset() <= offset
-								&& offset < element.getTextRange().getEndOffset()) {
-							path.add(entry.getKey());
-							enclosing = entry.getValue();
-							break;
-						}
+		return withStructure(project, fileName, fileType, text, none, (root, psi) -> enclosing(root, psi, offsets, false).stream().map(MemberPath::keys).toList());
+	}
+
+	/**
+	 * The keys, the shown labels and the icons of the members enclosing an offset, outermost first; all empty outside any
+	 * member. An icon is null when the structure view shows none.
+	 */
+	record MemberPath(List<String> keys, List<String> labels, List<Icon> icons) {
+		static final MemberPath NONE = new MemberPath(List.of(), List.of(), List.of());
+	}
+
+	/**
+	 * For each offset in the project file {@code psi}, the members enclosing it; like {@link #memberKeyPaths}, but with
+	 * the shown labels too and on the project's PSI, which resolves references. Call inside a read action.
+	 */
+	static List<MemberPath> memberPaths(PsiFile psi, int[] offsets) {
+		List<MemberPath> none = Collections.nCopies(offsets.length, MemberPath.NONE);
+		if (psi.getTextLength() > MAX_STRUCTURE_LENGTH) {
+			return none;
+		}
+		return withStructure(psi, none, (root, file) -> enclosing(root, file, offsets, true));
+	}
+
+	/** The members enclosing each offset, outermost first; with their icons when {@code withIcons}, else null icons. */
+	private static List<MemberPath> enclosing(TreeElement root, PsiFile psi, int[] offsets, boolean withIcons) {
+		List<MemberPath> result = new ArrayList<>(offsets.length);
+		for (int offset : offsets) {
+			List<String> keys = new ArrayList<>();
+			List<String> labels = new ArrayList<>();
+			List<Icon> icons = new ArrayList<>();
+			TreeElement current = root;
+			while (current != null) {
+				TreeElement enclosing = null;
+				for (Map.Entry<String, TreeElement> entry : keyedChildren(current, psi).entrySet()) {
+					PsiElement element = element(entry.getValue());
+					if (element != null && element.getTextRange().getStartOffset() <= offset
+							&& offset < element.getTextRange().getEndOffset()) {
+						keys.add(entry.getKey());
+						labels.add(label(entry.getValue()));
+						icons.add(withIcons ? entry.getValue().getPresentation().getIcon(false) : null);
+						enclosing = entry.getValue();
+						break;
 					}
-					current = enclosing;
 				}
-				result.add(path);
+				current = enclosing;
 			}
-			return result;
-		});
+			result.add(new MemberPath(keys, labels, Collections.unmodifiableList(icons)));
+		}
+		return result;
 	}
 
 	/** Children of {@code parent} declared in {@code file} by key: the label, with {@code #n} for the n-th same label. */

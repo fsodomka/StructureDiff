@@ -14,6 +14,7 @@ import javax.swing.Icon;
 import javax.swing.tree.DefaultMutableTreeNode;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -161,6 +162,29 @@ public class StructureDiffPanelTest extends BasePlatformTestCase {
 		assertEquals(List.of(), StructureDiffPanel.findingsOf(repoNode, findings));
 		assertEquals(List.of(), StructureDiffPanel.findingsOf(orphan, findings));
 		assertEquals(List.of(), StructureDiffPanel.findingsOf(new DefaultMutableTreeNode(file("/p/a.xml")), Map.of()));
+	}
+
+	public void testGroupByRoot() throws IOException {
+		VirtualFile projectRoot = myFixture.getTempDirFixture().findOrCreateDir("p");
+		VirtualFile other = myFixture.getTempDirFixture().findOrCreateDir("o");
+		assertFalse(StructureDiffPanel.groupByRoot(List.of(), projectRoot));
+		assertFalse(StructureDiffPanel.groupByRoot(List.of(projectRoot, projectRoot), projectRoot));
+		// another repository shows its node even when it is the only one with changes
+		assertTrue(StructureDiffPanel.groupByRoot(List.of(other), projectRoot));
+		assertTrue(StructureDiffPanel.groupByRoot(List.of(projectRoot, other), projectRoot));
+		// a project in no repository groups only files from several
+		assertFalse(StructureDiffPanel.groupByRoot(List.of(other, other), null));
+		assertTrue(StructureDiffPanel.groupByRoot(List.of(projectRoot, other), null));
+	}
+
+	public void testContentStampChangesWithTheAfterTexts() {
+		int stamp = StructureDiffPanel.contentStamp(List.of(file("/p/A.java", FileStatus.MODIFIED, "a", "b")));
+		// the before text and the status do not change what the working copy uses
+		assertEquals(stamp, StructureDiffPanel.contentStamp(List.of(file("/p/A.java", FileStatus.ADDED, "", "b"))));
+		assertFalse(stamp == StructureDiffPanel.contentStamp(List.of(file("/p/A.java", FileStatus.MODIFIED, "a", "b2"))));
+		assertFalse(stamp == StructureDiffPanel.contentStamp(List.of(file("/p/B.java", FileStatus.MODIFIED, "a", "b"))));
+		assertFalse(stamp == StructureDiffPanel.contentStamp(List.of(file("/p/A.java", FileStatus.MODIFIED, "a", "b"), file("/p/B.java"))));
+		assertFalse(stamp == StructureDiffPanel.contentStamp(List.of(file("/p/A.java", FileStatus.DELETED, "a", null))));
 	}
 
 	public void testExportRoots() throws IOException {
@@ -338,5 +362,34 @@ public class StructureDiffPanelTest extends BasePlatformTestCase {
 		assertEquals("", StructureDiffPanel.conventionalPackage("src/main/js/index.ts"));
 		assertNull(StructureDiffPanel.conventionalPackage("templates/marimo.html"));
 		assertNull(StructureDiffPanel.conventionalPackage("README.md"));
+	}
+
+	private static MemberLinks.Link link(VirtualFile file, String... keys) {
+		return new MemberLinks.Link(file, 0, 0, List.of(keys), List.of(keys), Collections.nCopies(keys.length, null), "", 1, false, false);
+	}
+
+	public void testRelatedNodesMatchMembersAndFallBackToCodeMembersOnly() {
+		VirtualFile file = myFixture.addFileToProject("A.java", "").getVirtualFile();
+		MemberDiff method = new MemberDiff("m()", "m()", "m()", "m()", null, FileStatus.MODIFIED, 0, 0, 1, 1, false, 0, List.of());
+		DefaultMutableTreeNode root = new DefaultMutableTreeNode();
+		DefaultMutableTreeNode fileNode = new DefaultMutableTreeNode(new FileDiff(null, file.getPath(), null, FileStatus.MODIFIED,
+				"", "", 1, 1, List.of()));
+		DefaultMutableTreeNode classNode = new DefaultMutableTreeNode(member("C", 1));
+		DefaultMutableTreeNode methodNode = new DefaultMutableTreeNode(method);
+		root.add(fileNode);
+		fileNode.add(classNode);
+		classNode.add(methodNode);
+		VirtualFile other = myFixture.addFileToProject("B.java", "").getVirtualFile();
+
+		assertEquals(Set.of(methodNode), StructureDiffPanel.relatedNodes(root,
+				new MemberLinks.Links(List.of(link(file, "C", "m()")), false, List.of(), false)));
+		assertEquals(Set.of(classNode), StructureDiffPanel.relatedNodes(root,
+				new MemberLinks.Links(List.of(), false, List.of(link(file, "C")), false)));
+		// a hidden nested member of a code member highlights the code member
+		assertEquals(Set.of(methodNode), StructureDiffPanel.relatedNodes(root,
+				new MemberLinks.Links(List.of(link(file, "C", "m()", "Runnable")), false, List.of(), false)));
+		// an unchanged member of a class is not related to the class; a file outside the tree matches nothing
+		assertEquals(Set.of(), StructureDiffPanel.relatedNodes(root,
+				new MemberLinks.Links(List.of(link(file, "C", "unchanged()"), link(other, "B")), false, List.of(link(file)), false)));
 	}
 }

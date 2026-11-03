@@ -35,6 +35,19 @@
         menu and finding icons work as in the tree.</li>
     </ul>
 
+    <h3>Show Usages</h3>
+    <ul>
+      <li><b>Show Usages</b> in the Structure Diff toolbar opens a panel below the tree or treemap with what the
+        selected member uses and what uses it: <b>Used by</b> and <b>Uses</b>, each split into internal (the member's
+        own file) and external (other files, by module), with members nested under their class and test code marked.</li>
+      <li>The changed members related to the selected one are highlighted in the tree and the treemap, so you
+        see which parts of a change belong together.</li>
+      <li>Imports, generated sources and build, configuration and text files are left out. The usages are searched again
+        after you edit the files; large searches are capped.</li>
+      <li>Double-click or Enter in the panel jumps to the usage; click the header to jump to the member itself. Not
+        available in Follow Git Log mode, as usages need the working-tree files.</li>
+    </ul>
+
     <h3>Member History</h3>
     <ul>
       <li><b>Show Member History</b> in the editor or tree context menu lists the commits that changed one class,

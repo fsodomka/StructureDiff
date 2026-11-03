@@ -28,6 +28,18 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
   boxes, **Enter** zooms in or jumps to source. Double-click, middle-click, the context menu and finding icons work as
   in the tree.
 
+## Show Usages
+
+- **Show Usages** in the Structure Diff toolbar opens a panel below the tree or treemap with what the selected member
+  uses and what uses it: **Used by** and **Uses**, each split into internal (the member's own file) and external
+  (other files, by module), with members nested under their class and test code marked.
+- The changed members related to the selected one are highlighted in the tree and the treemap, so you see
+  which parts of a change belong together.
+- Imports, generated sources and build, configuration and text files are left out. The usages are searched again
+  after you edit the files. Large searches are capped (200 callers, 2000 references resolved), shown as "capped".
+- Double-click or Enter in the panel jumps to the usage; click the header to jump to the member itself. Not available
+  in Follow Git Log mode, as usages need the working-tree files.
+
 ## Member History
 
 - **Show Member History** in the editor or tree context menu lists the commits that changed one class, method or

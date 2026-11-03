@@ -60,6 +60,7 @@ final class TreemapPanel extends JComponent {
 	private final Predicate<DefaultMutableTreeNode> notAnalysed;
 	private final Predicate<DefaultMutableTreeNode> testFile;
 	private final Function<DefaultMutableTreeNode, StructureDiffPanel.Flash> flash;
+	private final Predicate<DefaultMutableTreeNode> related;
 	private final BooleanSupplier loading;
 	private final Supplier<String> emptyText;
 	/** Painted rectangles, parents before their children; the last one containing a point is the deepest node there. */
@@ -102,6 +103,8 @@ final class TreemapPanel extends JComponent {
 	 * @param onDiagnostic click on a diagnostic icon, like the tree's
 	 * @param testFile  whether a node is a file in test sources, marked like the tree's icon
 	 * @param flash     the node's running flash, or null; the caller repaints while flashes run
+	 * @param related   whether a node uses or is used by the selected one, highlighted like the tree's row; the caller
+	 *                  repaints when it changes
 	 * @param loading   whether a refresh is in progress; the caller repaints when it changes
 	 * @param emptyText shown when there is nothing to show, like the tree's
 	 */
@@ -110,9 +113,10 @@ final class TreemapPanel extends JComponent {
 			Function<DefaultMutableTreeNode, List<MemberFinding>> findings, Consumer<List<MemberFinding>> onFindings,
 			Function<DefaultMutableTreeNode, List<MemberDiagnostic>> diagnostics, Predicate<DefaultMutableTreeNode> notAnalysed,
 			Consumer<DefaultMutableTreeNode> onDiagnostic, Predicate<DefaultMutableTreeNode> testFile,
-			Function<DefaultMutableTreeNode, StructureDiffPanel.Flash> flash,
+			Function<DefaultMutableTreeNode, StructureDiffPanel.Flash> flash, Predicate<DefaultMutableTreeNode> related,
 			BooleanSupplier loading, Supplier<String> emptyText) {
 		this.tree = tree;
+		this.related = related;
 		this.testFile = testFile;
 		this.flash = flash;
 		this.label = label;
@@ -558,15 +562,22 @@ final class TreemapPanel extends JComponent {
 		// red rather than the tree's gray, which a box can't strike out and which reads as unchanged
 		Color color = status == FileStatus.DELETED ? REMOVED
 				: status == null || status.getColor() == null ? UIUtil.getLabelForeground() : status.getColor();
-		g.setColor(ColorUtil.withAlpha(color, node.isLeaf() ? 0.35 : 0.12));
-		g.fillRect(r.x, r.y, r.width, r.height);
-		g.setColor(ColorUtil.withAlpha(color, 0.6));
-		g.drawRect(r.x, r.y, r.width - 1, r.height - 1);
-
 		FontMetrics metrics = g.getFontMetrics();
 		int pad = JBUI.scale(3);
 		int header = metrics.getHeight() + pad;
 		boolean nested = !node.isLeaf() && r.width > 4 * pad && r.height > header + 3 * pad;
+		g.setColor(ColorUtil.withAlpha(color, node.isLeaf() ? 0.35 : 0.12));
+		g.fillRect(r.x, r.y, r.width, r.height);
+		// over the status tint, as the tree's row background: blended, the blue of a modified box turns the amber gray. The
+		// border and label keep the status color. Only the header of a container showing its children, like the flash
+		// below, so a class is not taken for related through one of its members
+		if (!tree.isPathSelected(new TreePath(node.getPath())) && related.test(node)) {
+			g.setColor(StructureDiffPanel.RELATED);
+			g.fill(nested ? new Rectangle(r.x, r.y, r.width, header) : r);
+		}
+		g.setColor(ColorUtil.withAlpha(color, 0.6));
+		g.drawRect(r.x, r.y, r.width - 1, r.height - 1);
+
 		// under the label; a container showing its children flashes only its header, like its row in the tree, so a
 		// class changed through one method does not look as if all its methods changed. At full strength the color
 		// covers about half the background, a little more than the tree's flash, so the label in the same color stays
