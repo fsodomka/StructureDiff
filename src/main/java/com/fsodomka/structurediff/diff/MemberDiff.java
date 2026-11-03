@@ -1,4 +1,4 @@
-package com.fsodomka.structurediff;
+package com.fsodomka.structurediff.diff;
 
 import com.intellij.openapi.vcs.FileStatus;
 
@@ -21,7 +21,7 @@ public record MemberDiff(String key, String beforeKey, String label, String befo
 						 int afterOffset, int linesAdded, int linesRemoved, boolean container, long changeId,
 						 List<MemberDiff> children) {
 
-	MemberDiff withChildren(List<MemberDiff> newChildren) {
+	public MemberDiff withChildren(List<MemberDiff> newChildren) {
 		return new MemberDiff(key, beforeKey, label, beforeLabel, icon, status, beforeOffset, afterOffset, linesAdded, linesRemoved, container,
 				changeId, newChildren);
 	}

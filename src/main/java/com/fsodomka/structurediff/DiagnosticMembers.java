@@ -1,5 +1,7 @@
 package com.fsodomka.structurediff;
 
+import com.fsodomka.structurediff.diff.FileDiff;
+import com.fsodomka.structurediff.diff.MemberLocator;
 import com.fsodomka.structurediff.settings.DiagnosticLevel;
 import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerEx;
 import com.intellij.codeInsight.daemon.impl.HighlightInfo;
@@ -65,7 +67,7 @@ final class DiagnosticMembers {
 	 * pooled thread. {@code cache} is kept by the caller across calls and only touched by the returned supplier.
 	 */
 	static Supplier<Diagnostics> prepare(Project project, List<FileDiff> files, Set<DiagnosticLevel> shown,
-										 Map<String, CachedKeyPaths> cache) {
+                                         Map<String, CachedKeyPaths> cache) {
 		Map<String, VirtualFile> open = new HashMap<>();
 		for (VirtualFile file : FileEditorManager.getInstance(project).getOpenFiles()) {
 			open.put(file.getPath(), file);

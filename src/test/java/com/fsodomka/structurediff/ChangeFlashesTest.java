@@ -1,5 +1,7 @@
 package com.fsodomka.structurediff;
 
+import com.fsodomka.structurediff.diff.FileDiff;
+import com.fsodomka.structurediff.diff.MemberDiff;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 

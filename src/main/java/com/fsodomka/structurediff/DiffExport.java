@@ -1,6 +1,7 @@
 package com.fsodomka.structurediff;
 
 import com.fsodomka.structurediff.DiffTreeNodes.RepoNode;
+import com.fsodomka.structurediff.diff.FileDiff;
 import com.fsodomka.structurediff.settings.StructureDiffSettings;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
@@ -37,7 +38,7 @@ final class DiffExport {
 	 * when no shown file is in a repository. A selection of files or repositories restricts the export to those roots.
 	 */
 	static List<VirtualFile> exportRoots(List<FileDiff> shownFiles, Map<String, VirtualFile> vcsRoots,
-			List<DefaultMutableTreeNode> selected) {
+										 List<DefaultMutableTreeNode> selected) {
 		List<VirtualFile> roots = shownFiles.stream().map(f -> vcsRoots.get(f.path())).filter(Objects::nonNull)
 				.distinct().toList();
 		if (roots.size() <= 1) {

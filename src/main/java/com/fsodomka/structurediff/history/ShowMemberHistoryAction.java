@@ -1,6 +1,6 @@
 package com.fsodomka.structurediff.history;
 
-import com.fsodomka.structurediff.MemberLocator;
+import com.fsodomka.structurediff.diff.MemberLocator;
 import com.intellij.codeInsight.hint.HintManager;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;

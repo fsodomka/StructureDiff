@@ -2,6 +2,9 @@ package com.fsodomka.structurediff;
 
 import com.fsodomka.structurediff.MemberLinks.Link;
 import com.fsodomka.structurediff.MemberLinks.Links;
+import com.fsodomka.structurediff.diff.FileDiff;
+import com.fsodomka.structurediff.diff.MemberDiff;
+import com.fsodomka.structurediff.diff.MemberLocator;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;

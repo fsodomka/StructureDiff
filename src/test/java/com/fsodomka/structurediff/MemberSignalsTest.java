@@ -1,6 +1,8 @@
 package com.fsodomka.structurediff;
 
 import com.fsodomka.structurediff.DiagnosticMembers.MemberDiagnostic;
+import com.fsodomka.structurediff.diff.FileDiff;
+import com.fsodomka.structurediff.diff.MemberDiff;
 import com.fsodomka.structurediff.review.FindingMembers.MemberFinding;
 import com.fsodomka.structurediff.review.ReviewSeverity;
 import com.intellij.icons.AllIcons;

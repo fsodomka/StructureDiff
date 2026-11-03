@@ -1,5 +1,8 @@
 package com.fsodomka.structurediff;
 
+import com.fsodomka.structurediff.diff.FileDiff;
+import com.fsodomka.structurediff.diff.MemberDiff;
+
 import javax.swing.tree.DefaultMutableTreeNode;
 import java.awt.*;
 import java.awt.geom.Rectangle2D;

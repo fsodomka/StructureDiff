@@ -1,4 +1,4 @@
-package com.fsodomka.structurediff;
+package com.fsodomka.structurediff.diff;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileTypes.FileType;
@@ -35,7 +35,7 @@ public final class RevisionContent {
 	}
 
 	/** Unversioned file, shown as added. */
-	static FileDiff loadUnversioned(FilePath path, @Nullable FileDiff previous) {
+	public static FileDiff loadUnversioned(FilePath path, @Nullable FileDiff previous) {
 		return load(new Change(null, CurrentContentRevision.create(path)), FileStatus.ADDED, Map.of(), previous);
 	}
 
@@ -57,7 +57,7 @@ public final class RevisionContent {
 	}
 
 	/** Cache key of a committed revision; null for the working copy, whose content can change. */
-	static String revisionKey(ContentRevision revision) {
+	public static String revisionKey(ContentRevision revision) {
 		if (revision == null || revision instanceof CurrentContentRevision) {
 			return null;
 		}

@@ -1,5 +1,7 @@
 package com.fsodomka.structurediff;
 
+import com.fsodomka.structurediff.diff.FileDiff;
+import com.fsodomka.structurediff.diff.StructureDiffComputer;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.roots.ProjectFileIndex;
@@ -21,7 +23,7 @@ import java.util.stream.Collectors;
  * when it is in no repository. Looking the roots up can block on the file index, so it is done here, not on the EDT.
  */
 record Snapshot(List<FileDiff> files, Map<String, VirtualFile> roots, Set<String> unversioned, Set<String> tests,
-						Map<String, String> packages, @Nullable VirtualFile projectRoot) {
+				Map<String, String> packages, @Nullable VirtualFile projectRoot) {
 	/**
 	 * Computes the snapshot of {@code loaded} in a read action, reusing the members of {@code previous} files whose
 	 * contents did not change. The read action restarts after every write action; {@code computed} keeps the files

@@ -1,7 +1,11 @@
 package com.fsodomka.structurediff;
 
-import com.fsodomka.structurediff.MemberLocator.Located;
-import com.fsodomka.structurediff.MemberLocator.Step;
+import com.fsodomka.structurediff.diff.MemberLocator;
+import com.fsodomka.structurediff.diff.MemberLocator.Located;
+import com.fsodomka.structurediff.diff.MemberLocator.Step;
+import com.fsodomka.structurediff.diff.FileDiff;
+import com.fsodomka.structurediff.diff.MemberDiff;
+import com.fsodomka.structurediff.diff.StructureDiffComputer;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;

@@ -1,6 +1,7 @@
 package com.fsodomka.structurediff;
 
 import com.fsodomka.structurediff.DiffTreeNodes.Ghost;
+import com.fsodomka.structurediff.diff.MemberDiff;
 import com.intellij.openapi.vcs.FileStatus;
 import junit.framework.TestCase;
 

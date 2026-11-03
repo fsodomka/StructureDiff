@@ -1,5 +1,8 @@
 package com.fsodomka.structurediff;
 
+import com.fsodomka.structurediff.diff.FileDiff;
+import com.fsodomka.structurediff.diff.MemberDiff;
+import com.fsodomka.structurediff.diff.MemberLocator;
 import com.fsodomka.structurediff.history.MemberHistoryToolWindowFactory;
 import com.fsodomka.structurediff.source.ChangeSource;
 import com.fsodomka.structurediff.source.LocalChangeSource;

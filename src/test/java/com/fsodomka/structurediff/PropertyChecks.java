@@ -7,7 +7,7 @@ import org.jetbrains.jetCheck.PropertyFalsified;
 import java.util.function.Consumer;
 
 /** Runs jetCheck properties so that a failure reports its shrunk counterexample. */
-final class PropertyChecks {
+public final class PropertyChecks {
 	private PropertyChecks() {
 	}
 
@@ -16,7 +16,7 @@ final class PropertyChecks {
 	 * The test report shows the cause of {@link PropertyFalsified} rather than its message, which holds the shrunk
 	 * counterexample and how to replay it, so this rethrows the message alone (it includes the cause's trace).
 	 */
-	static <T> void forAll(Generator<T> generator, Consumer<T> check) {
+	public static <T> void forAll(Generator<T> generator, Consumer<T> check) {
 		try {
 			PropertyChecker.forAll(generator, value -> {
 				check.accept(value);

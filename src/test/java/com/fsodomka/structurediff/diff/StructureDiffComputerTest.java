@@ -1,4 +1,4 @@
-package com.fsodomka.structurediff;
+package com.fsodomka.structurediff.diff;
 
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.vcs.FilePath;

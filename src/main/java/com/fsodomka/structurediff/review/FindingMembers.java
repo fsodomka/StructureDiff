@@ -1,6 +1,6 @@
 package com.fsodomka.structurediff.review;
 
-import com.fsodomka.structurediff.MemberLocator;
+import com.fsodomka.structurediff.diff.MemberLocator;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;

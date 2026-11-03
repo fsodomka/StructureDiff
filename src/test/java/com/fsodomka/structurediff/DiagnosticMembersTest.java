@@ -2,6 +2,7 @@ package com.fsodomka.structurediff;
 
 import com.fsodomka.structurediff.DiagnosticMembers.Diagnostics;
 import com.fsodomka.structurediff.DiagnosticMembers.MemberDiagnostic;
+import com.fsodomka.structurediff.diff.FileDiff;
 import com.fsodomka.structurediff.settings.DiagnosticLevel;
 import com.intellij.icons.AllIcons;
 import com.intellij.lang.annotation.HighlightSeverity;

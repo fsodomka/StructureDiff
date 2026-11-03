@@ -1,6 +1,8 @@
 package com.fsodomka.structurediff;
 
-import com.fsodomka.structurediff.MemberLocator.MemberPath;
+import com.fsodomka.structurediff.diff.MemberLocator;
+import com.fsodomka.structurediff.diff.MemberLocator.MemberPath;
+import com.fsodomka.structurediff.diff.StructureDiffComputer;
 import com.intellij.lang.Language;
 import com.intellij.lang.findUsages.EmptyFindUsagesProvider;
 import com.intellij.lang.findUsages.LanguageFindUsages;

@@ -1,10 +1,10 @@
 package com.fsodomka.structurediff.history;
 
-import com.fsodomka.structurediff.MemberLocator;
-import com.fsodomka.structurediff.MemberLocator.Located;
-import com.fsodomka.structurediff.MemberLocator.Step;
-import com.fsodomka.structurediff.RevisionContent;
-import com.fsodomka.structurediff.StructureDiffComputer;
+import com.fsodomka.structurediff.diff.MemberLocator;
+import com.fsodomka.structurediff.diff.MemberLocator.Located;
+import com.fsodomka.structurediff.diff.MemberLocator.Step;
+import com.fsodomka.structurediff.diff.RevisionContent;
+import com.fsodomka.structurediff.diff.StructureDiffComputer;
 import com.fsodomka.structurediff.history.HistoryRow.Kind;
 import com.fsodomka.structurediff.history.MemberHistory.Batch;
 import com.intellij.diff.DiffContentFactory;

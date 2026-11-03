@@ -1,6 +1,8 @@
 package com.fsodomka.structurediff;
 
 import com.fsodomka.structurediff.DiffTreeNodes.Ghost;
+import com.fsodomka.structurediff.diff.FileDiff;
+import com.fsodomka.structurediff.diff.MemberDiff;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.Nullable;

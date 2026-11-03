@@ -1,4 +1,4 @@
-package com.fsodomka.structurediff;
+package com.fsodomka.structurediff.diff;
 
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.vcs.FileStatus;
@@ -13,7 +13,7 @@ import java.util.List;
 public record FileDiff(Change change, String path, FileType fileType, FileStatus status,
 					   String beforeText, String afterText, int linesAdded, int linesRemoved, List<MemberDiff> members) {
 
-	FileDiff withMembers(List<MemberDiff> newMembers) {
+	public FileDiff withMembers(List<MemberDiff> newMembers) {
 		return new FileDiff(change, path, fileType, status, beforeText, afterText, linesAdded, linesRemoved, newMembers);
 	}
 }

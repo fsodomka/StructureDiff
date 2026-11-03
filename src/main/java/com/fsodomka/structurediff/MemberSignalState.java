@@ -2,6 +2,7 @@ package com.fsodomka.structurediff;
 
 import com.fsodomka.structurediff.DiagnosticMembers.Diagnostics;
 import com.fsodomka.structurediff.DiagnosticMembers.MemberDiagnostic;
+import com.fsodomka.structurediff.diff.FileDiff;
 import com.fsodomka.structurediff.review.FindingMembers;
 import com.fsodomka.structurediff.review.FindingMembers.MemberFinding;
 import com.fsodomka.structurediff.review.ReviewFindingsToolWindowFactory;

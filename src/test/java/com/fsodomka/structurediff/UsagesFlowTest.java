@@ -2,6 +2,9 @@ package com.fsodomka.structurediff;
 
 import com.fsodomka.structurediff.UsagesPanel.Entry;
 import com.fsodomka.structurediff.UsagesPanel.Heading;
+import com.fsodomka.structurediff.diff.FileDiff;
+import com.fsodomka.structurediff.diff.MemberDiff;
+import com.fsodomka.structurediff.diff.StructureDiffComputer;
 import com.fsodomka.structurediff.source.ChangeSource;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.Disposable;

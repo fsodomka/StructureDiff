@@ -1,6 +1,6 @@
 package com.fsodomka.structurediff.history;
 
-import com.fsodomka.structurediff.StructureDiffComputer;
+import com.fsodomka.structurediff.diff.StructureDiffComputer;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.FilePath;

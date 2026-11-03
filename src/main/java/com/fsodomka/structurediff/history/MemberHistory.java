@@ -1,6 +1,6 @@
 package com.fsodomka.structurediff.history;
 
-import com.fsodomka.structurediff.*;
+import com.fsodomka.structurediff.diff.*;
 import com.fsodomka.structurediff.history.HistoryRow.Kind;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.progress.ProcessCanceledException;

@@ -1,4 +1,4 @@
-package com.fsodomka.structurediff;
+package com.fsodomka.structurediff.diff;
 
 import com.intellij.ide.structureView.StructureViewBuilder;
 import com.intellij.ide.structureView.StructureViewModel;
@@ -56,7 +56,7 @@ public final class MemberLocator {
 	 * Offset in {@code text} of the member at {@code path}, matched by key like {@link StructureDiffComputer#diff} matches members,
 	 * else by name; -1 when the file type has no tree-based structure view or the member is not there. Call inside a read action.
 	 */
-	static int currentOffset(Project project, String fileName, FileType fileType, CharSequence text, List<MemberDiff> path) {
+	public static int currentOffset(Project project, String fileName, FileType fileType, CharSequence text, List<MemberDiff> path) {
 		// parsed like the revisions, not taken from the document: the PSI of an uncommitted document is stale, and committing needs the write-intent lock
 		List<Step> steps = path.stream().map(m -> new Step(m.key(), StructureDiffComputer.name(m.label()))).toList();
 		return withStructure(project, fileName, fileType, text, -1, (root, psi) -> {
@@ -70,7 +70,7 @@ public final class MemberLocator {
 	 * null where the member is not there, all null when the file type has no tree-based structure view. Unlike the other
 	 * lookups this uses the project's PSI, which resolves references. Call inside a read action.
 	 */
-	static List<PsiElement> elements(PsiFile psi, List<List<MemberDiff>> paths) {
+	public static List<PsiElement> elements(PsiFile psi, List<List<MemberDiff>> paths) {
 		List<PsiElement> none = Collections.nCopies(paths.size(), null);
 		if (psi.getTextLength() > StructureDiffComputer.MAX_STRUCTURE_LENGTH) {
 			return none;
@@ -169,15 +169,15 @@ public final class MemberLocator {
 	 * The keys, the shown labels and the icons of the members enclosing an offset, outermost first; all empty outside any
 	 * member. An icon is null when the structure view shows none.
 	 */
-	record MemberPath(List<String> keys, List<String> labels, List<Icon> icons) {
-		static final MemberPath NONE = new MemberPath(List.of(), List.of(), List.of());
+	public record MemberPath(List<String> keys, List<String> labels, List<Icon> icons) {
+		public static final MemberPath NONE = new MemberPath(List.of(), List.of(), List.of());
 	}
 
 	/**
 	 * For each offset in the project file {@code psi}, the members enclosing it; like {@link #memberKeyPaths}, but with
 	 * the shown labels too and on the project's PSI, which resolves references. Call inside a read action.
 	 */
-	static List<MemberPath> memberPaths(PsiFile psi, int[] offsets) {
+	public static List<MemberPath> memberPaths(PsiFile psi, int[] offsets) {
 		List<MemberPath> none = Collections.nCopies(offsets.length, MemberPath.NONE);
 		if (psi.getTextLength() > StructureDiffComputer.MAX_STRUCTURE_LENGTH) {
 			return none;

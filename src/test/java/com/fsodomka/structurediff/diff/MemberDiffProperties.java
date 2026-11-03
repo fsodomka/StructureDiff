@@ -1,24 +1,16 @@
-package com.fsodomka.structurediff;
+package com.fsodomka.structurediff.diff;
 
-import com.fsodomka.structurediff.StructureDiffComputer.Member;
+import com.fsodomka.structurediff.diff.StructureDiffComputer.Member;
 import com.intellij.openapi.vcs.FileStatus;
 import org.jetbrains.jetCheck.Generator;
 import org.jetbrains.jetCheck.IntDistribution;
 import org.junit.Test;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static com.fsodomka.structurediff.PropertyChecks.forAll;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 /**
  * Properties of {@link StructureDiffComputer#diff} on generated member trees, checked with jetCheck. Names, signatures and
