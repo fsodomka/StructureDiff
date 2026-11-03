@@ -58,7 +58,7 @@ public final class StructureDiffComputer {
 	 * Structure element of one file version. {@code text} is the element source, used for the line diff; the label when
 	 * there is no PSI element. {@code normalizedText} is compared to detect changes, see {@link #normalizedText}.
 	 */
-	private record Member(String key, String label, Icon icon, PsiElement element, String text, String normalizedText,
+	record Member(String key, String label, Icon icon, PsiElement element, String text, String normalizedText,
 						  int offset, boolean container, List<Member> children) {
 	}
 
@@ -421,7 +421,7 @@ public final class StructureDiffComputer {
 		}
 	}
 
-	private static List<MemberDiff> diff(List<Member> before, List<Member> after) {
+	static List<MemberDiff> diff(List<Member> before, List<Member> after) {
 		Map<String, Member> beforeByKey = new LinkedHashMap<>();
 		for (Member m : before) {
 			beforeByKey.put(m.key(), m);
