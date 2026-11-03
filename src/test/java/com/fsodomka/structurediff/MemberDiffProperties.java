@@ -4,8 +4,6 @@ import com.fsodomka.structurediff.StructureDiffComputer.Member;
 import com.intellij.openapi.vcs.FileStatus;
 import org.jetbrains.jetCheck.Generator;
 import org.jetbrains.jetCheck.IntDistribution;
-import org.jetbrains.jetCheck.PropertyChecker;
-import org.jetbrains.jetCheck.PropertyFalsified;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -15,9 +13,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import static com.fsodomka.structurediff.PropertyChecks.forAll;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -216,22 +214,6 @@ public class MemberDiffProperties {
 			assertFalse(name.contains("(") || name.contains(":"));
 			assertEquals(name, StructureDiffComputer.name(name));
 		});
-	}
-
-	/**
-	 * Checks {@code check} on generated values; it fails by throwing, such as by a failed assertion, and returns to skip a value.
-	 * The test report shows the cause of {@link PropertyFalsified} rather than its message, which holds the shrunk
-	 * counterexample and how to replay it, so this rethrows the message alone (it includes the cause's trace).
-	 */
-	private static <T> void forAll(Generator<T> generator, Consumer<T> check) {
-		try {
-			PropertyChecker.forAll(generator, value -> {
-				check.accept(value);
-				return true;
-			});
-		} catch (PropertyFalsified e) {
-			throw new AssertionError(e.getMessage());
-		}
 	}
 
 	/** Up to {@code max} siblings with unique keys: the label, with "#n" on its repeats, as in the computer. */

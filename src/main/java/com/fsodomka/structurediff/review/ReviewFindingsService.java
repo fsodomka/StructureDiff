@@ -17,6 +17,7 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.editor.event.DocumentEvent;
 import com.intellij.openapi.editor.event.DocumentListener;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileDocumentManagerListener;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
@@ -240,17 +241,30 @@ public final class ReviewFindingsService implements PersistentStateComponent<Rev
 		return true;
 	}
 
+	/** Findings of a review file, null when it cannot be read, with the documents of their files held strongly. */
+	private record Parsed(@Nullable List<Finding> findings, List<Document> documents) {
+	}
+
 	private void load(VirtualFile root, VirtualFile file, boolean replaceNewer, boolean showToolWindow, boolean external) {
 		ReadAction.nonBlocking(() -> {
 					List<Finding> findings = parse(root, file);
-					// resolves the paths once here, so that the VFS caches the files and placing them on the EDT reads no persistence
+					// resolves the paths and loads the documents here, so that placing the findings on the EDT reads neither the
+					// VFS persistence nor the files' text; the documents are cached weakly, so they are held until then
+					List<Document> documents = new ArrayList<>();
 					if (findings != null) {
-						findings.forEach(finding -> ReviewHighlighter.resolve(root, finding.path()));
+						for (Finding finding : findings) {
+							VirtualFile reviewed = ReviewHighlighter.resolve(root, finding.path());
+							Document document = reviewed == null || !reviewed.isValid() ? null
+									: FileDocumentManager.getInstance().getDocument(reviewed);
+							if (document != null) {
+								documents.add(document);
+							}
+						}
 					}
-					return findings;
+					return new Parsed(findings, documents);
 				})
 				.finishOnUiThread(ModalityState.defaultModalityState(),
-						findings -> apply(root, file, findings, replaceNewer, showToolWindow, external))
+						parsed -> apply(root, file, parsed.findings(), replaceNewer, showToolWindow, external))
 				.coalesceBy(this, file)
 				.expireWith(this)
 				.submit(AppExecutorUtil.getAppExecutorService());
