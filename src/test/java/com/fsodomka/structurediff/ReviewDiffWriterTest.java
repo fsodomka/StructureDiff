@@ -19,7 +19,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public class DiffExporterTest extends BasePlatformTestCase {
+public class ReviewDiffWriterTest extends BasePlatformTestCase {
 	private Path root;
 
 	@Override
@@ -53,7 +53,7 @@ public class DiffExporterTest extends BasePlatformTestCase {
 				// an unversioned earlier export: left out
 				new Change(null, new SimpleContentRevision("diff\n", earlierDiff, "2")));
 
-		Path file = DiffExporter.export(getProject(), root, "reviews", changes, LocalDateTime.of(2026, 10, 15, 9, 5, 7));
+		Path file = ReviewDiffWriter.export(getProject(), root, "reviews", changes, LocalDateTime.of(2026, 10, 15, 9, 5, 7));
 
 		assertEquals(root.resolve("reviews").resolve("20261015-090507-changes.diff"), file);
 		try (Stream<Path> files = Files.list(file.getParent())) {
@@ -75,9 +75,9 @@ public class DiffExporterTest extends BasePlatformTestCase {
 		List<Change> changes = List.of(new Change(null, new SimpleContentRevision("new\n", path("Added.txt"), "2")));
 		LocalDateTime now = LocalDateTime.of(2026, 10, 15, 9, 5, 7);
 
-		Path first = DiffExporter.export(getProject(), root, "reviews", changes, now);
-		Path second = DiffExporter.export(getProject(), root, "reviews", changes, now);
-		Path third = DiffExporter.export(getProject(), root, "reviews", changes, now);
+		Path first = ReviewDiffWriter.export(getProject(), root, "reviews", changes, now);
+		Path second = ReviewDiffWriter.export(getProject(), root, "reviews", changes, now);
+		Path third = ReviewDiffWriter.export(getProject(), root, "reviews", changes, now);
 
 		assertEquals("20261015-090507-changes.diff", first.getFileName().toString());
 		assertEquals("20261015-090507-changes-2.diff", second.getFileName().toString());
@@ -88,7 +88,7 @@ public class DiffExporterTest extends BasePlatformTestCase {
 	public void testLabelsAnExportForOneRepository() throws Exception {
 		List<Change> changes = List.of(new Change(null, new SimpleContentRevision("new\n", path("Added.txt"), "2")));
 
-		Path file = DiffExporter.export(getProject(), root, "reviews", changes,
+		Path file = ReviewDiffWriter.export(getProject(), root, "reviews", changes,
 				LocalDateTime.of(2026, 10, 15, 9, 5, 7), "repo");
 
 		assertEquals("20261015-090507-repo-changes.diff", file.getFileName().toString());
@@ -98,7 +98,7 @@ public class DiffExporterTest extends BasePlatformTestCase {
 		Files.createDirectories(root.resolve("reviews"));
 		FilePath added = path("Added.txt");
 
-		DiffExporter.export(getProject(), root, "reviews", List.of(new Change(null, new SimpleContentRevision("new\n", added, "2"))),
+		ReviewDiffWriter.export(getProject(), root, "reviews", List.of(new Change(null, new SimpleContentRevision("new\n", added, "2"))),
 				LocalDateTime.of(2026, 10, 15, 9, 5, 7));
 
 		assertFalse(Files.exists(root.resolve("reviews").resolve(".gitignore")));

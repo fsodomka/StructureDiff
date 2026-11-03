@@ -115,7 +115,7 @@ final class DiffExport {
 				try {
 					for (VirtualFile root : roots) {
 						failed = root;
-						exported.add(DiffExporter.export(project, root.toNioPath(), reviewsDir, changes.get(root), now, labels.get(root)));
+						exported.add(ReviewDiffWriter.export(project, root.toNioPath(), reviewsDir, changes.get(root), now, labels.get(root)));
 					}
 				}
 				catch (VcsException | IOException e) {
@@ -139,7 +139,7 @@ final class DiffExport {
 				} else {
 					notify(NotificationType.INFORMATION, saved);
 				}
-				// DiffExporter already refreshed the files into the VFS
+				// ReviewDiffWriter already refreshed the files into the VFS
 				FileEditorManager editors = FileEditorManager.getInstance(project);
 				for (Path path : exported) {
 					VirtualFile file = LocalFileSystem.getInstance().findFileByNioFile(path);

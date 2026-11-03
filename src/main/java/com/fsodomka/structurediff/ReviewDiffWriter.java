@@ -21,11 +21,11 @@ import java.util.Collection;
 import java.util.List;
 
 /** Writes changes as a unified diff into the reviews directory of their repository root, for the review skill. */
-final class DiffExporter {
+final class ReviewDiffWriter {
 	/** The timestamp format of the skill's own review files. */
 	private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
-	private DiffExporter() {
+	private ReviewDiffWriter() {
 	}
 
 	/**
