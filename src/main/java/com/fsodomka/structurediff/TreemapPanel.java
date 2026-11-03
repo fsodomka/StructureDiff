@@ -59,7 +59,7 @@ final class TreemapPanel extends JComponent {
 	private final Function<DefaultMutableTreeNode, List<MemberDiagnostic>> diagnostics;
 	private final Predicate<DefaultMutableTreeNode> notAnalysed;
 	private final Predicate<DefaultMutableTreeNode> testFile;
-	private final Function<DefaultMutableTreeNode, StructureDiffPanel.Flash> flash;
+	private final Function<DefaultMutableTreeNode, ChangeFlashes.Flash> flash;
 	private final Predicate<DefaultMutableTreeNode> related;
 	private final BooleanSupplier loading;
 	private final Supplier<String> emptyText;
@@ -113,7 +113,7 @@ final class TreemapPanel extends JComponent {
 			Function<DefaultMutableTreeNode, List<MemberFinding>> findings, Consumer<List<MemberFinding>> onFindings,
 			Function<DefaultMutableTreeNode, List<MemberDiagnostic>> diagnostics, Predicate<DefaultMutableTreeNode> notAnalysed,
 			Consumer<DefaultMutableTreeNode> onDiagnostic, Predicate<DefaultMutableTreeNode> testFile,
-			Function<DefaultMutableTreeNode, StructureDiffPanel.Flash> flash, Predicate<DefaultMutableTreeNode> related,
+			Function<DefaultMutableTreeNode, ChangeFlashes.Flash> flash, Predicate<DefaultMutableTreeNode> related,
 			BooleanSupplier loading, Supplier<String> emptyText) {
 		this.tree = tree;
 		this.related = related;
@@ -548,7 +548,7 @@ final class TreemapPanel extends JComponent {
 
 	private void paintNode(Graphics2D g, DefaultMutableTreeNode node, Rectangle2D rect) {
 		// a node that appeared grows from its center, with its children laid out inside
-		StructureDiffPanel.Flash running = flash.apply(node);
+		ChangeFlashes.Flash running = flash.apply(node);
 		long now = System.currentTimeMillis();
 		if (running != null) {
 			rect = scaled(rect, running.grown(now));

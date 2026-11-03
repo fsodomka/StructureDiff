@@ -44,13 +44,13 @@ public class RevealFlashTest extends BasePlatformTestCase {
 		Rectangle visible = tree.getVisibleRect();
 		assertEquals(0, visible.y);
 		assertTrue(visible.height > 0 && visible.height < 600);
-		StructureDiffPanel.revealFlash(tree, List.of(row(40), row(30)));
+		ChangeFlashes.revealFlash(tree, List.of(row(40), row(30)));
 		assertTrue(tree.getVisibleRect().intersects(tree.getPathBounds(row(30))));
 		assertFalse(tree.getVisibleRect().intersects(tree.getPathBounds(row(40))));
 	}
 
 	public void testKeepsViewWhenAFlashIsVisible() {
-		StructureDiffPanel.revealFlash(tree, List.of(row(40), row(1)));
+		ChangeFlashes.revealFlash(tree, List.of(row(40), row(1)));
 		assertEquals(0, tree.getVisibleRect().y);
 	}
 
@@ -70,14 +70,14 @@ public class RevealFlashTest extends BasePlatformTestCase {
 		// not displayed, so the viewport does not take the expanded size by itself
 		tree.getParent().getParent().doLayout();
 		((JViewport) tree.getParent()).doLayout();
-		StructureDiffPanel.revealFlash(tree, List.of(member));
+		ChangeFlashes.revealFlash(tree, List.of(member));
 
 		assertTrue(tree.getVisibleRect().intersects(tree.getPathBounds(member)));
 	}
 
 	public void testIgnoresFlashUnderCollapsedNode() {
 		TreePath hidden = new TreePath(((DefaultMutableTreeNode) folded.getChildAt(0)).getPath());
-		StructureDiffPanel.revealFlash(tree, List.of(hidden));
+		ChangeFlashes.revealFlash(tree, List.of(hidden));
 		assertEquals(0, tree.getVisibleRect().y);
 		assertFalse(tree.isExpanded(new TreePath(folded.getPath())));
 	}

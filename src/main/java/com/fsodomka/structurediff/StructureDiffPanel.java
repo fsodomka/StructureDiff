@@ -1,11 +1,10 @@
 package com.fsodomka.structurediff;
 
+import com.fsodomka.structurediff.ChangeFlashes.Flash;
 import com.fsodomka.structurediff.DiagnosticMembers.Diagnostics;
 import com.fsodomka.structurediff.DiagnosticMembers.MemberDiagnostic;
 import com.fsodomka.structurediff.DiffTreeNodes.Ghost;
 import com.fsodomka.structurediff.DiffTreeNodes.RepoNode;
-import com.fsodomka.structurediff.MemberLinks.Link;
-import com.fsodomka.structurediff.MemberLinks.Links;
 import com.fsodomka.structurediff.history.MemberHistoryToolWindowFactory;
 import com.fsodomka.structurediff.review.FindingMembers;
 import com.fsodomka.structurediff.review.FindingMembers.MemberFinding;
@@ -33,25 +32,17 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ide.CommonActionsManager;
 import com.intellij.ide.DefaultTreeExpander;
 import com.intellij.ide.util.PropertiesComponent;
-import com.intellij.notification.NotificationGroupManager;
-import com.intellij.notification.NotificationType;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.command.WriteCommandAction;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.*;
 import com.intellij.openapi.ide.CopyPasteManager;
-import com.intellij.openapi.progress.ProcessCanceledException;
-import com.intellij.openapi.progress.ProgressIndicator;
-import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ProjectUtil;
-import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.openapi.ui.popup.Balloon;
@@ -64,18 +55,12 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.FileStatus;
-import com.intellij.openapi.vcs.ProjectLevelVcsManager;
-import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangesUtil;
 import com.intellij.openapi.vcs.changes.ContentRevision;
 import com.intellij.openapi.vcs.changes.CurrentContentRevision;
 import com.intellij.openapi.vfs.LocalFileSystem;
-import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiManager;
 import com.intellij.ui.*;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBLabel;
@@ -90,10 +75,8 @@ import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
-import org.jetbrains.concurrency.CancellablePromise;
 
 import javax.swing.*;
-import javax.swing.Timer;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
@@ -102,12 +85,8 @@ import java.awt.datatransfer.StringSelection;
 import java.awt.event.HierarchyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.io.IOException;
-import java.nio.file.Path;
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.List;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
@@ -130,38 +109,22 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		}
 	};
 	private final Alarm alarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, this);
-	private static final long FLASH_MILLIS = 4000;
-	/** How long a node that appeared takes to grow from its center to full size in the treemap. */
-	static final long GROW_MILLIS = 250;
-	/** The fade's frame time; a grow runs at {@link #GROW_FRAME_MILLIS}, as a few frames in a quarter second look choppy. */
-	private static final int FADE_FRAME_MILLIS = 50;
-	private static final int GROW_FRAME_MILLIS = 16;
+	private final ChangeFlashes flashes = new ChangeFlashes(() -> {
+		tree.repaint();
+		this.treemap.repaint();
+	}, () -> show(this.files, false), () -> this.showTreemap);
 	/** The {@link FileDiff} a diff request was opened from, so a later open of the same file can reuse its tab. */
 	private static final Key<FileDiff> OPENED_FILE_DIFF = Key.create("structureDiff.openedFileDiff");
-	/**
-	 * Recent changes by node key. Nodes that appeared or changed get a background that fades out;
-	 * nodes that disappeared stay in the tree as {@link Ghost}s until their flash ends. Each node has its own flash:
-	 * content changes to a flashing node do not restart it, while other nodes flash independently; a status change or
-	 * removal always flashes.
-	 */
-	private final Map<List<String>, Flash> flashes = new HashMap<>();
-	/** Whether a refresh result with {@link ChangeSource#highlightChanges()} was shown; it is the initial state, not changes to flash, even if a later one starts from an empty tree. */
-	private boolean baselineShown;
-	private final Timer fadeTimer = new Timer(GROW_FRAME_MILLIS, e -> fadeStep());
 	private static final String SHOW_NESTED_KEY = "structureDiff.showNested";
 	private static final String SHOW_UNVERSIONED_KEY = "structureDiff.showUnversioned";
 	private static final String FLASH_CHANGES_KEY = "structureDiff.flashChanges";
 	private static final String SHOW_TREEMAP_KEY = "structureDiff.showTreemap";
 	private static final String SHOW_USAGES_KEY = "structureDiff.showUsages";
-	private static final Logger LOG = Logger.getInstance(StructureDiffPanel.class);
 	/**
 	 * Background of the changed members that use or are used by the selected one: soft amber, like the editor's search
 	 * result highlight, so it is not taken for the blue selection and sits well under the green, blue and grey status text.
 	 */
 	static final JBColor RELATED = new JBColor(0xFFEFC2, 0x6B5C1F);
-	/** Editor type id of the platform's internal DiffPatchFileEditorProvider, which shows a patch file in the diff viewer. */
-	private static final String PATCH_DIFF_EDITOR_TYPE = "DiffPatchFileEditorProvider";
-
 	private final AtomicInteger generation = new AtomicInteger();
 	private final SimpleColoredComponent summary = new SimpleColoredComponent();
 	/** Finding counts per severity, after {@link #summary}; one icon each, which a {@link SimpleColoredComponent} cannot show. */
@@ -169,6 +132,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private volatile List<FileDiff> files = List.of();
 	/** VCS root of each file path; files are grouped by root when there is more than one. */
 	private Map<String, VirtualFile> vcsRoots = Map.of();
+	/** The VCS root holding the project's directory, from the last refresh; see {@link Snapshot#projectRoot()}. */
+	private @Nullable VirtualFile projectRoot;
 	/** Contents of committed revisions, which never change; loading them is VCS I/O. */
 	private final Map<String, String> revisionCache = new ConcurrentHashMap<>();
 	private boolean showNested = PropertiesComponent.getInstance().getBoolean(SHOW_NESTED_KEY, false);
@@ -178,25 +143,15 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private final JScrollPane treeScroll = ScrollPaneFactory.createScrollPane(tree);
 	private boolean showUsages = PropertiesComponent.getInstance().getBoolean(SHOW_USAGES_KEY, false);
 	private final UsagesPanel usagesPanel;
+	private final UsagesController usages;
 	/** The tree or treemap above the {@link #usagesPanel}; its proportion is saved under its key. */
 	private final OnePixelSplitter usagesSplitter = new OnePixelSplitter(true, "structureDiff.usagesProportion", 0.7f);
-	/** The key of the node whose usages are shown or searched; null when none is. */
-	private List<String> usagesKey;
-	/** The usages of {@link #usagesKey}; null while the first search runs or when there are none to show. */
-	private Links usages;
-	/** The {@link #contentStamp} of the files when {@link #usages} were searched; a different one searches again. */
-	private int usagesStamp;
-	/** The running search; null when none runs. */
-	private CancellablePromise<Links> usagesSearch;
-	private int usagesGeneration;
-	/** The changed members related to the selected one by {@link #usages}, painted with {@link #RELATED}; EDT only. */
-	private Set<DefaultMutableTreeNode> relatedNodes = Set.of();
 	/** Set while {@link #show} replaces the tree, whose selection events are not the user's. */
 	private boolean rebuilding;
 	private final TreemapPanel treemap = new TreemapPanel(tree, StructureDiffPanel::speedSearchText,
 			node -> DiffTreeNodes.keyPart(node.getUserObject()), this::jumpToSource, this::openSelected,
 			this::findingsOf, this::showFindings, this::diagnosticsOf, this::notAnalysed, this::openDiagnostic, this::isTestFile,
-			node -> flashes.isEmpty() ? null : flashes.get(DiffTreeNodes.keyOf(node)), node -> relatedNodes.contains(node), () -> this.loading, () -> tree.getEmptyText().getText());
+			flashes::get, this::isRelated, () -> this.loading, () -> tree.getEmptyText().getText());
 	/** A refresh is in progress, from the start until the first one finishes; shown by the treemap, the tree paints busy. */
 	private boolean loading = true;
 	/** Paths of the unversioned files in {@link #files}; they are loaded even when hidden, so the toggle needs no refresh. */
@@ -225,6 +180,10 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		this.source = source;
 		usagesPanel = new UsagesPanel(project, this::jumpToSource);
 		Disposer.register(this, usagesPanel);
+		usages = new UsagesController(project, usagesPanel, tree, () -> {
+			tree.repaint();
+			treemap.repaint();
+		}, this);
 
 		tree.setRootVisible(false);
 		// "Nothing to show" only once the first refresh finished
@@ -647,50 +606,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		revisionCache.keySet().retainAll(usedRevisions);
 		// the read action restarts after every write action (each keystroke); keep the files already parsed
 		AtomicReferenceArray<FileDiff> computed = new AtomicReferenceArray<>(loaded.size());
-		ReadAction.nonBlocking(() -> {
-					ProjectLevelVcsManager vcsManager = ProjectLevelVcsManager.getInstance(project);
-					ProjectFileIndex fileIndex = ProjectFileIndex.getInstance(project);
-					Map<String, VirtualFile> roots = new HashMap<>();
-					Set<String> tests = new HashSet<>();
-					Map<String, String> packages = new HashMap<>();
-					for (FileDiff file : loaded) {
-						VirtualFile virtualFile = LocalFileSystem.getInstance().findFileByPath(file.path());
-						if (virtualFile != null && fileIndex.isInTestSourceContent(virtualFile)) {
-							tests.add(file.path());
-						}
-						VirtualFile root = vcsManager.getVcsRootFor(ChangesUtil.getFilePath(file.change()));
-						if (root != null) {
-							roots.put(file.path(), root);
-						}
-						// the directory relative to its source root; PackageIndex would need the Java plugin
-						VirtualFile dir = virtualFile == null ? null : virtualFile.getParent();
-						VirtualFile sourceRoot = dir == null ? null : fileIndex.getSourceRootForFile(dir);
-						String packageName = sourceRoot == null ? null : VfsUtilCore.getRelativePath(dir, sourceRoot, '.');
-						if (packageName == null) {
-							// outside the project's source roots, e.g. another repository or an unmarked src/main/js
-							String path = root != null && file.path().startsWith(root.getPath() + "/")
-									? file.path().substring(root.getPath().length() + 1) : file.path();
-							packageName = PackageNames.conventionalPackage(path);
-							if (path.startsWith("src/test/") || path.contains("/src/test/")) {
-								tests.add(file.path());
-							}
-						}
-						if (packageName != null) {
-							packages.put(file.path(), packageName);
-						}
-					}
-					List<FileDiff> withMembers = new ArrayList<>(loaded.size());
-					for (int i = 0; i < loaded.size(); i++) {
-						FileDiff file = computed.get(i);
-						if (file == null) {
-							file = withMembers(previous, loaded.get(i));
-							computed.set(i, file);
-						}
-						withMembers.add(file);
-					}
-					return new Snapshot(withMembers, roots, unversioned.stream().map(FilePath::getPath).collect(Collectors.toSet()), tests,
-							PackageNames.relativePackages(packages, roots));
-				})
+		ReadAction.nonBlocking(() -> Snapshot.compute(project, loaded, previous, unversioned, computed))
 				.inSmartMode(project)
 				.expireWith(this)
 				// cancels the computation of an older refresh, whose result would be discarded anyway
@@ -702,6 +618,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 						tree.getEmptyText().setText(StatusText.getDefaultEmptyText());
 						files = snapshot.files();
 						vcsRoots = snapshot.roots();
+						projectRoot = snapshot.projectRoot();
 						unversionedPaths = snapshot.unversioned();
 						testPaths = snapshot.tests();
 					packages = snapshot.packages();
@@ -725,71 +642,6 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		@Override
 		public @NotNull ActionUpdateThread getActionUpdateThread() {
 			return ActionUpdateThread.EDT;
-		}
-	}
-
-	private record Snapshot(List<FileDiff> files, Map<String, VirtualFile> roots, Set<String> unversioned, Set<String> tests,
-							Map<String, String> packages) {
-	}
-
-	/** The VCS root holding the project's directory, which may be above it; null when it is in no repository. */
-	private @Nullable VirtualFile projectRoot() {
-		VirtualFile projectDir = ProjectUtil.guessProjectDir(project);
-		return projectDir == null ? null : ProjectLevelVcsManager.getInstance(project).getVcsRootFor(projectDir);
-	}
-
-	/** Reuses the members of a file whose contents did not change since the last refresh; parsing is the costly part. */
-	private FileDiff withMembers(Map<String, FileDiff> previous, FileDiff file) {
-		FileDiff old = previous.get(file.path());
-		if (old != null && old.members() != null && old.status() == file.status() && Objects.equals(old.beforeText(), file.beforeText())
-				&& Objects.equals(old.afterText(), file.afterText())) {
-			return file.withMembers(old.members());
-		}
-		return StructureDiffComputer.withMembers(project, file);
-	}
-
-	/**
-	 * A recent change of the node at a key. {@code vanished} is the user object of a node that disappeared,
-	 * shown at {@code index} of its parent until the flash ends; null for a node that appeared or changed.
-	 * {@code appeared} tells a node that was not there before, which grows in the treemap, from one that changed.
-	 * Package-private for the test of {@link #newFlashes}.
-	 */
-	record Flash(FileStatus status, boolean appeared, Object vanished, int index, long start) {
-		/** 1 for the first half of the flash, then fading to 0. */
-		double strength(long now) {
-			double remaining = 1 - (double) (now - start) / FLASH_MILLIS;
-			return Math.clamp(remaining * 2, 0, 1);
-		}
-
-		boolean expired(long now) {
-			return now - start >= FLASH_MILLIS;
-		}
-
-		/** The size of the node's box in the treemap, from 0 to 1, easing out over {@link #GROW_MILLIS}; 1 unless it appeared. */
-		double grown(long now) {
-			if (!appeared) {
-				return 1;
-			}
-			double t = Math.clamp((double) (now - start) / GROW_MILLIS, 0, 1);
-			return 1 - Math.pow(1 - t, 3);
-		}
-	}
-
-	private void fadeStep() {
-		long now = System.currentTimeMillis();
-		boolean ghostExpired = flashes.values().stream().anyMatch(f -> f.vanished() != null && f.expired(now));
-		flashes.values().removeIf(f -> f.expired(now));
-		if (flashes.isEmpty()) {
-			fadeTimer.stop();
-		}
-		boolean growing = flashes.values().stream().anyMatch(f -> f.grown(now) < 1);
-		fadeTimer.setDelay(growing && showTreemap ? GROW_FRAME_MILLIS : FADE_FRAME_MILLIS);
-		if (ghostExpired) {
-			show(files, false);
-		}
-		else {
-			tree.repaint();
-			treemap.repaint();
 		}
 	}
 
@@ -829,7 +681,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 
 		DefaultMutableTreeNode root = new DefaultMutableTreeNode();
 		boolean groupByRoot = DiffTreeNodes.groupByRoot(allFiles.stream().map(f -> vcsRoots.get(f.path())).filter(Objects::nonNull).toList(),
-				projectRoot());
+				projectRoot);
 		Map<VirtualFile, DefaultMutableTreeNode> repoNodes = new LinkedHashMap<>();
 		int[] total = new int[3];
 		int linesAdded = 0;
@@ -858,22 +710,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		}
 		Map<List<String>, DefaultMutableTreeNode> newNodes = new HashMap<>();
 		DiffTreeNodes.collectNodes(root, new ArrayList<>(), newNodes);
-		long now = System.currentTimeMillis();
-		// a flash that ended is dropped before new ones start, so its node can flash again
-		flashes.entrySet().removeIf(e -> e.getValue().expired(now) || e.getValue().vanished() != null && newNodes.containsKey(e.getKey()));
-		Map<List<String>, Flash> started = Map.of();
-		if (highlightChanges && baselineShown && flashChanges) {
-			started = newFlashes(oldNodes, newNodes, flashes.keySet(), now);
-			flashes.putAll(started);
-		}
-		baselineShown |= highlightChanges;
-		insertGhosts(root, newNodes, repoNodes);
-		if (flashes.isEmpty()) {
-			fadeTimer.stop();
-		}
-		else if (!fadeTimer.isRunning()) {
-			fadeTimer.start();
-		}
+		Set<List<String>> started = flashes.update(oldNodes, newNodes, highlightChanges, flashChanges, root, repoNodes, vcsRoots);
 		rebuilding = true;
 		try {
 			((DefaultTreeModel) tree.getModel()).setRoot(root);
@@ -895,7 +732,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		}
 		updateUsages();
 		if (!started.isEmpty()) {
-			revealFlash(tree, started.keySet().stream().map(key -> DiffTreeNodes.find(root, key)).filter(Objects::nonNull)
+			ChangeFlashes.revealFlash(tree, started.stream().map(key -> DiffTreeNodes.find(root, key)).filter(Objects::nonNull)
 					.map(node -> new TreePath(node.getPath())).toList());
 		}
 
@@ -908,165 +745,19 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		updateFindingCounts();
 	}
 
-	/**
-	 * Scrolls the topmost of the flashed {@code paths} into view when none of them is visible, so a flash is not missed
-	 * in a tree taller than the view. Paths under a collapsed node are left alone: the user collapsed it.
-	 */
-	static void revealFlash(JTree tree, List<TreePath> paths) {
-		Rectangle visible = tree.getVisibleRect();
-		Rectangle topmost = null;
-		for (TreePath path : paths) {
-			Rectangle bounds = tree.isVisible(path) ? tree.getPathBounds(path) : null;
-			if (bounds == null) {
-				continue;
-			}
-			if (bounds.intersects(visible)) {
-				return;
-			}
-			if (topmost == null || bounds.y < topmost.y) {
-				topmost = bounds;
-			}
-		}
-		if (topmost != null) {
-			tree.scrollRectToVisible(topmost);
-		}
-	}
-
 	/** {@code loadedFiles} without the unversioned ones while they are hidden. */
 	private List<FileDiff> shownFiles(List<FileDiff> loadedFiles) {
 		return showUnversioned ? loadedFiles : loadedFiles.stream().filter(f -> !unversionedPaths.contains(f.path())).toList();
 	}
 
+	/** Writes the shown changes of {@link #exportRoots()} for review; see {@link DiffExport#export}. */
+	private void exportDiff() {
+		DiffExport.export(project, exportRoots(), shownFiles(files), vcsRoots);
+	}
+
 	/** Roots to export: the roots of the selection, else the roots of all shown files; empty when none is in a repository. */
 	private List<VirtualFile> exportRoots() {
-		return exportRoots(shownFiles(files), vcsRoots, selectedNodes());
-	}
-
-	/**
-	 * The roots of the selected repositories and files, else every root of {@code shownFiles}, in their order; empty
-	 * when no shown file is in a repository. A selection of files or repositories restricts the export to those roots.
-	 */
-	static List<VirtualFile> exportRoots(List<FileDiff> shownFiles, Map<String, VirtualFile> vcsRoots,
-			List<DefaultMutableTreeNode> selected) {
-		List<VirtualFile> roots = shownFiles.stream().map(f -> vcsRoots.get(f.path())).filter(Objects::nonNull)
-				.distinct().toList();
-		if (roots.size() <= 1) {
-			return roots;
-		}
-		Set<VirtualFile> selectedRoots = new HashSet<>();
-		for (DefaultMutableTreeNode node : selected) {
-			if (node.getUserObject() instanceof RepoNode(VirtualFile root)) {
-				selectedRoots.add(root);
-			}
-			else {
-				FileDiff file = DiffTreeNodes.fileOf(node);
-				VirtualFile root = file == null ? null : vcsRoots.get(file.path());
-				if (root != null) {
-					selectedRoots.add(root);
-				}
-			}
-		}
-		return selectedRoots.isEmpty() ? roots : roots.stream().filter(selectedRoots::contains).toList();
-	}
-
-	/** Name of {@code root} for a diff of its own, safe for a file name and unique among {@code used}. */
-	private static String repoLabel(VirtualFile root, Set<String> used) {
-		String base = root.getName().replaceAll("[^A-Za-z0-9._-]+", "-");
-		if (base.isEmpty() || base.equals(".") || base.equals("..")) {
-			base = "repo";
-		}
-		String label = base;
-		for (int i = 2; !used.add(label); i++) {
-			label = base + "-" + i;
-		}
-		return label;
-	}
-
-	/** {@code exported} relative to the project base directory when it is below it, else absolute, with {@code /} separators. */
-	private String commandPath(Path exported) {
-		Path file = exported.toAbsolutePath().normalize();
-		String base = project.getBasePath();
-		if (base != null) {
-			Path basePath = Path.of(base).toAbsolutePath().normalize();
-			if (file.startsWith(basePath)) {
-				return basePath.relativize(file).toString().replace('\\', '/');
-			}
-		}
-		return file.toString().replace('\\', '/');
-	}
-
-	/**
-	 * Writes the shown changes of {@link #exportRoots()} to their reviews directories and copies the review command if
-	 * enabled: the selected repository only, or a diff for each of several repositories when none is selected.
-	 */
-	private void exportDiff() {
-		List<VirtualFile> roots = exportRoots();
-		if (roots.isEmpty()) {
-			return;
-		}
-		List<FileDiff> shown = shownFiles(files);
-		Map<VirtualFile, List<Change>> changes = new LinkedHashMap<>();
-		Map<VirtualFile, String> labels = new LinkedHashMap<>();
-		Set<String> usedLabels = new HashSet<>();
-		for (VirtualFile root : roots) {
-			changes.put(root, shown.stream().filter(f -> root.equals(vcsRoots.get(f.path()))).map(FileDiff::change).toList());
-			// a diff per repository needs a name of its own; one selected repository keeps the plain name
-			labels.put(root, roots.size() == 1 ? "" : repoLabel(root, usedLabels));
-		}
-		StructureDiffSettings settings = StructureDiffSettings.getInstance();
-		String reviewsDir = settings.reviewsDir();
-		LocalDateTime now = LocalDateTime.now();
-		new Task.Backgroundable(project, roots.size() == 1 ? "Exporting diff for review" : "Exporting diffs for review", false) {
-			private final List<Path> exported = new ArrayList<>();
-			private VirtualFile failed;
-			private Exception error;
-
-			@Override
-			public void run(@NotNull ProgressIndicator indicator) {
-				try {
-					for (VirtualFile root : roots) {
-						failed = root;
-						exported.add(DiffExporter.export(project, root.toNioPath(), reviewsDir, changes.get(root), now, labels.get(root)));
-					}
-				}
-				catch (VcsException | IOException e) {
-					error = e;
-				}
-			}
-
-			@Override
-			public void onSuccess() {
-				if (error != null) {
-					notify(NotificationType.ERROR, "Cannot export the diff of " + failed.getName() + ": " + error.getMessage());
-					return;
-				}
-				List<String> paths = exported.stream().map(StructureDiffPanel.this::commandPath).toList();
-				String saved = paths.size() == 1
-						? "Diff saved to " + paths.get(0) + "."
-						: "Diffs saved to " + String.join(", ", paths) + ".";
-				if (settings.copyCommandToClipboard() && !settings.skillCommand().isEmpty()) {
-					CopyPasteManager.getInstance().setContents(new StringSelection(settings.skillCommand() + " " + String.join(" ", paths)));
-					notify(NotificationType.INFORMATION, saved + " Review command copied — paste it into your AI agent.");
-				} else {
-					notify(NotificationType.INFORMATION, saved);
-				}
-				// DiffExporter already refreshed the files into the VFS
-				FileEditorManager editors = FileEditorManager.getInstance(project);
-				for (Path path : exported) {
-					VirtualFile file = LocalFileSystem.getInstance().findFileByNioFile(path);
-					if (file != null) {
-						new OpenFileDescriptor(project, file).navigate(true);
-						// shows the patch in the diff viewer; does nothing when the IDE has it disabled (registry enable.patch.file.diff.viewer)
-						editors.setSelectedEditor(file, PATCH_DIFF_EDITOR_TYPE);
-					}
-				}
-			}
-
-			private void notify(NotificationType type, String content) {
-				NotificationGroupManager.getInstance().getNotificationGroup("Structure Diff")
-						.createNotification(StringUtil.escapeXmlEntities(content), type).notify(project);
-			}
-		}.queue();
+		return DiffExport.exportRoots(shownFiles(files), vcsRoots, selectedNodes());
 	}
 
 	/** Recomputes which members the review findings are in, then repaints. */
@@ -1264,80 +955,6 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		};
 	}
 
-	/**
-	 * Whether the node whose user object is {@code after} changed since the same key held {@code before}: its status
-	 * changed, or it is a member modified again, which keeps its status but gets a new {@link MemberDiff#changeId()}.
-	 * A file that stays modified is not a change: every member edit would also flash the file.
-	 */
-	static boolean changedSince(Object before, Object after) {
-		if (DiffTreeNodes.statusOf(before) != DiffTreeNodes.statusOf(after)) {
-			return true;
-		}
-		return before instanceof MemberDiff was && after instanceof MemberDiff now && was.changeId() != now.changeId();
-	}
-
-	/**
-	 * The flashes for the nodes that appeared, changed or disappeared since {@code oldNodes}. A content change to a
-	 * node whose key is in {@code running} is skipped, so its flash is not restarted while it runs, while other nodes
-	 * flash independently; a status change replaces the running flash to show the new status. A removal always flashes
-	 * as a {@link Ghost}, even while the removed node's own flash runs.
-	 */
-	static Map<List<String>, Flash> newFlashes(Map<List<String>, DefaultMutableTreeNode> oldNodes,
-											   Map<List<String>, DefaultMutableTreeNode> newNodes, Set<List<String>> running, long now) {
-		Map<List<String>, Flash> result = new LinkedHashMap<>();
-		newNodes.forEach((key, node) -> {
-			FileStatus status = DiffTreeNodes.statusOf(node.getUserObject());
-			DefaultMutableTreeNode old = oldNodes.get(key);
-			boolean statusChanged = old != null && status != DiffTreeNodes.statusOf(old.getUserObject());
-			if (status != null && (statusChanged || !running.contains(key))
-					&& (old == null || changedSince(old.getUserObject(), node.getUserObject()))
-					&& (node.getUserObject() instanceof FileDiff || hadMembers(node, oldNodes))) {
-				result.put(key, new Flash(status, old == null, null, -1, now));
-			}
-		});
-		oldNodes.forEach((key, node) -> {
-			FileStatus status = DiffTreeNodes.statusOf(node.getUserObject());
-			// only the topmost vanished node; its subtree goes with it
-			boolean parentRemains = key.size() == 2 || newNodes.containsKey(key.subList(0, key.size() - 1));
-			if (status != null && !newNodes.containsKey(key) && parentRemains
-					&& (node.getUserObject() instanceof FileDiff || hadMembers(node, newNodes))) {
-				result.put(key, new Flash(status, false, node.getUserObject(), node.getParent().getIndex(node), now));
-			}
-		});
-		return result;
-	}
-
-	/**
-	 * Whether a member node's appearance or disappearance is a change to flash: its file had computed members in the
-	 * other tree, or is a modified file new there (its first changed member). Members of an added file all come with it,
-	 * and members of a file whose structure was not available yet (before revision still loading) are not changes.
-	 */
-	private static boolean hadMembers(DefaultMutableTreeNode member, Map<List<String>, DefaultMutableTreeNode> otherNodes) {
-		DefaultMutableTreeNode fileNode = DiffTreeNodes.fileNode(member);
-		if (fileNode == null) {
-			return false;
-		}
-		DefaultMutableTreeNode other = otherNodes.get(DiffTreeNodes.keyOf(fileNode));
-		if (other == null) {
-			return DiffTreeNodes.statusOf(fileNode.getUserObject()) == FileStatus.MODIFIED;
-		}
-		return other.getUserObject() instanceof FileDiff file && file.members() != null;
-	}
-
-	private void insertGhosts(DefaultMutableTreeNode root, Map<List<String>, DefaultMutableTreeNode> nodes,
-							  Map<VirtualFile, DefaultMutableTreeNode> repoNodes) {
-		flashes.forEach((key, flash) -> {
-			if (flash.vanished() == null) {
-				return;
-			}
-			DefaultMutableTreeNode parent = key.size() > 2 ? nodes.get(key.subList(0, key.size() - 1))
-					: flash.vanished() instanceof FileDiff file ? repoNodes.getOrDefault(vcsRoots.get(file.path()), root) : root;
-			if (parent != null) {
-				parent.insert(new DefaultMutableTreeNode(new Ghost(flash.vanished())), Math.min(flash.index(), parent.getChildCount()));
-			}
-		});
-	}
-
 	/** The added/modified/removed {@link DiffTreeNodes#count}s, each in its status color, where not 0. */
 	private static void appendCounts(SimpleColoredComponent component, int[] counts, int style) {
 		appendCount(component, "+", counts[0], FileStatus.ADDED, style);
@@ -1441,6 +1058,18 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		return DiffTreeNodes.memberPath(selectedNode());
 	}
 
+	/** Whether {@code node} is related to the selected member by its usages; for the treemap, created before them. */
+	private boolean isRelated(DefaultMutableTreeNode node) {
+		return usages.isRelated(node);
+	}
+
+	/** Searches the usages of the selected member while they are shown. */
+	private void updateUsages() {
+		if (usagesShown()) {
+			usages.update(selectedNode(), files);
+		}
+	}
+
 	/** Whether the {@link #usagesPanel} is shown: Show Usages is on, and the files are the working copy, not a commit's. */
 	private boolean usagesShown() {
 		return showUsages && !(source instanceof CommitChangeSource);
@@ -1452,165 +1081,13 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		if (!usagesShown()) {
 			usagesSplitter.setFirstComponent(null);
 			setContent(main);
-			cancelUsages();
+			usages.cancel();
 			return;
 		}
 		usagesSplitter.setFirstComponent(main);
 		usagesSplitter.setSecondComponent(usagesPanel);
 		setContent(usagesSplitter);
 		updateUsages();
-	}
-
-	/** Drops the shown usages and the highlight, cancelling a running search. */
-	private void cancelUsages() {
-		cancelUsagesSearch();
-		usagesKey = null;
-		setUsages(null);
-	}
-
-	/** Cancels a running search; its result is dropped even if it already finished and waits for the EDT. */
-	private void cancelUsagesSearch() {
-		if (usagesSearch != null) {
-			usagesSearch.cancel();
-			usagesSearch = null;
-		}
-		usagesGeneration++;
-	}
-
-	/** Sets {@link #usages} and highlights the members they relate in the current tree. */
-	private void setUsages(@Nullable Links links) {
-		usages = links;
-		Set<DefaultMutableTreeNode> related = links == null ? Set.of() : relatedNodes((DefaultMutableTreeNode) tree.getModel().getRoot(), links);
-		if (!related.equals(relatedNodes)) {
-			relatedNodes = related;
-			tree.repaint();
-			treemap.repaint();
-		}
-	}
-
-	/** Shows {@code message} in place of the usages, dropping the highlight. */
-	private void showUsagesMessage(String message) {
-		setUsages(null);
-		usagesPanel.showMessage(message);
-	}
-
-	/**
-	 * Stamp of the files' contents: when it differs from {@link #usagesStamp}, an edit may have changed the usages.
-	 * Cheap to recompute: a string caches its hash, and the texts of unchanged files are kept across refreshes.
-	 */
-	static int contentStamp(List<FileDiff> files) {
-		int stamp = 1;
-		for (FileDiff file : files) {
-			stamp = 31 * (31 * stamp + file.path().hashCode()) + Objects.hashCode(file.afterText());
-		}
-		return stamp;
-	}
-
-	/**
-	 * Searches the callers and callees of the selected member while Show Usages is on. When the same member is selected
-	 * after the tree was rebuilt, the shown usages are matched to the new nodes; they are searched again only when the
-	 * files changed or the last search found nothing, and stay shown until the new search replaces them.
-	 */
-	private void updateUsages() {
-		if (!usagesShown()) {
-			return;
-		}
-		DefaultMutableTreeNode node = selectedNode();
-		List<String> key = node == null ? null : DiffTreeNodes.keyOf(node);
-		int stamp = contentStamp(files);
-		boolean sameMember = key != null && key.equals(usagesKey);
-		if (sameMember) {
-			setUsages(usages);
-			if (stamp == usagesStamp && (usages != null || usagesSearch != null)) {
-				return;
-			}
-			cancelUsagesSearch();
-		}
-		else {
-			cancelUsages();
-			usagesKey = key;
-		}
-		usagesStamp = stamp;
-		if (node == null || !(node.getUserObject() instanceof MemberDiff member)) {
-			usagesPanel.clear();
-			return;
-		}
-		FileDiff file = Objects.requireNonNull(DiffTreeNodes.fileOf(node));
-		ContentRevision after = file.change().getAfterRevision();
-		if (after == null || member.afterOffset() < 0) {
-			showUsagesMessage("A removed member has no usages to look up");
-			return;
-		}
-		VirtualFile workingFile = after instanceof CurrentContentRevision current ? current.getVirtualFile() : null;
-		if (workingFile == null) {
-			showUsagesMessage("Usages need the working-tree version of this file");
-			return;
-		}
-		List<MemberDiff> path = DiffTreeNodes.memberPath(node);
-		int generation = usagesGeneration;
-		if (usages == null) {
-			usagesPanel.showBusy(member.label());
-		}
-		usagesSearch = ReadAction.nonBlocking(() -> {
-					PsiFile psi = workingFile.isValid() ? PsiManager.getInstance(project).findFile(workingFile) : null;
-					PsiElement element = psi == null ? null : StructureDiffComputer.elements(psi, List.of(path)).getFirst();
-					return element == null ? null : MemberLinks.links(project, element);
-				})
-				.inSmartMode(project)
-				.expireWith(this)
-				.finishOnUiThread(ModalityState.defaultModalityState(), links -> {
-					if (generation != usagesGeneration) {
-						return;
-					}
-					usagesSearch = null;
-					if (links == null) {
-						showUsagesMessage("Member not found in the working copy");
-						return;
-					}
-					setUsages(links);
-					usagesPanel.show(member.label(), links);
-				})
-				.submit(AppExecutorUtil.getAppExecutorService());
-		usagesSearch.onError(e -> {
-			if (e instanceof ProcessCanceledException || e instanceof CancellationException) {
-				return;
-			}
-			LOG.error("Usages could not be found", e);
-			UIUtil.invokeLaterIfNeeded(() -> {
-				if (generation == usagesGeneration) {
-					usagesSearch = null;
-					showUsagesMessage("Usages could not be found");
-				}
-			});
-		});
-	}
-
-	/**
-	 * The member nodes below {@code root} that hold {@code links}. A link to a member that is not in the tree highlights
-	 * the deepest code member on its path, which holds it as nested code (nested changes hidden, or an unchanged nested
-	 * member); not a class, whose unchanged members are not related to the class.
-	 */
-	static Set<DefaultMutableTreeNode> relatedNodes(DefaultMutableTreeNode root, Links links) {
-		Set<DefaultMutableTreeNode> result = new HashSet<>();
-		for (Link link : Stream.concat(links.callers().stream(), links.callees().stream()).toList()) {
-			DefaultMutableTreeNode node = DiffTreeNodes.child(root, link.file().getPath());
-			if (node == null || link.keys().isEmpty()) {
-				continue;
-			}
-			int matched = 0;
-			for (String part : link.keys()) {
-				DefaultMutableTreeNode next = DiffTreeNodes.child(node, part);
-				if (next == null) {
-					break;
-				}
-				node = next;
-				matched++;
-			}
-			if (matched == link.keys().size() || matched > 0 && node.getUserObject() instanceof MemberDiff member && !member.container()) {
-				result.add(node);
-			}
-		}
-		return result;
 	}
 
 	/** A member that exists after the change, in a file that has an after revision. */
@@ -1746,7 +1223,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 
 	@Override
 	public void dispose() {
-		fadeTimer.stop();
+		flashes.stop();
 	}
 
 	private final class Renderer extends ColoredTreeCellRenderer {
@@ -1759,11 +1236,11 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			if (item instanceof Ghost(Object ghostItem)) {
 				item = ghostItem;
 			}
-			Flash flash = flashes.isEmpty() ? null : flashes.get(DiffTreeNodes.keyOf(node));
+			Flash flash = flashes.get(node);
 			// a removed node that vanished came back (removal undone): it flashes as added, not as gone
 			boolean restored = ghost && flash != null && flash.status() == FileStatus.DELETED;
 			Color background = flash == null ? null : flashBackground(flash, ghost, restored);
-			if (background == null && !selected && relatedNodes.contains(node)) {
+			if (background == null && !selected && usages.isRelated(node)) {
 				background = RELATED;
 			}
 			if (item instanceof RepoNode(VirtualFile root)) {
