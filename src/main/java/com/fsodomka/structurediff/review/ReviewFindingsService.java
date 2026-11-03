@@ -85,6 +85,8 @@ public final class ReviewFindingsService implements PersistentStateComponent<Rev
 	public ReviewFindingsService(Project project) {
 		this.project = project;
 		highlighter = new ReviewHighlighter(project);
+		ApplicationManager.getApplication().getMessageBus().connect(this)
+				.subscribe(StructureDiffSettings.ReviewsDirListener.TOPIC, this::reviewsDirChanged);
 		// a reload from disk replaces the whole text, which collapses the highlights
 		ApplicationManager.getApplication().getMessageBus().connect(this).subscribe(FileDocumentManagerListener.TOPIC,
 				new FileDocumentManagerListener() {

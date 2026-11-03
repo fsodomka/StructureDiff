@@ -354,9 +354,9 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 
 	/**
 	 * Picks up the toggles saved by another panel: the Uncommitted panel outlives mode switches, and the settings are
-	 * shared by all projects.
+	 * shared by all projects. Package-private for {@code ViewOptionsTest}.
 	 */
-	private void loadSettings() {
+	void loadSettings() {
 		Set<Option> changed = options.reload();
 		if (changed.contains(Option.TREEMAP) || changed.contains(Option.USAGES)) {
 			// later, not in the showing event: that comes from this panel's addNotify before its children's, so a child

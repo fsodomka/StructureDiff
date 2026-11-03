@@ -1,6 +1,7 @@
 package com.fsodomka.structurediff.review;
 
 import com.fsodomka.structurediff.settings.StructureDiffSettings;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.application.impl.NonBlockingReadActionImpl;
 import com.intellij.openapi.command.WriteCommandAction;
@@ -326,7 +327,8 @@ public class ReviewFindingsServiceTest extends BasePlatformTestCase {
 		assertEquals(List.of("From reviews."), highlighted());
 
 		StructureDiffSettings.getInstance().getState().reviewsDir = "ai";
-		service.reviewsDirChanged();
+		// as the settings page announces it
+		ApplicationManager.getApplication().getMessageBus().syncPublisher(StructureDiffSettings.ReviewsDirListener.TOPIC).reviewsDirChanged();
 		waitForLoad();
 		assertEquals(List.of("From ai."), highlighted());
 	}

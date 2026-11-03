@@ -1,11 +1,8 @@
 package com.fsodomka.structurediff.settings;
 
-import com.fsodomka.structurediff.review.ReviewFindingsService;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SearchableConfigurable;
-import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ProjectManager;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
@@ -101,9 +98,7 @@ final class StructureDiffConfigurable implements SearchableConfigurable {
 		state.showWeakWarnings = showWeakWarnings.isSelected();
 		reviewsDir.setText(dir);
 		if (dirChanged) {
-			for (Project project : ProjectManager.getInstance().getOpenProjects()) {
-				ReviewFindingsService.getInstance(project).reviewsDirChanged();
-			}
+			ApplicationManager.getApplication().getMessageBus().syncPublisher(StructureDiffSettings.ReviewsDirListener.TOPIC).reviewsDirChanged();
 		}
 		if (!levels.equals(settings.diagnosticLevels())) {
 			ApplicationManager.getApplication().getMessageBus().syncPublisher(StructureDiffSettings.DiagnosticLevelsListener.TOPIC).levelsChanged();

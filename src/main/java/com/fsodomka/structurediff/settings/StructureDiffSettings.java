@@ -40,6 +40,13 @@ public final class StructureDiffSettings implements PersistentStateComponent<Str
 		void levelsChanged();
 	}
 
+	/** Application-level notification that the reviews directory changed; each project's review findings reload. */
+	public interface ReviewsDirListener {
+		Topic<ReviewsDirListener> TOPIC = Topic.create("Structure Diff reviews directory", ReviewsDirListener.class);
+
+		void reviewsDirChanged();
+	}
+
 	private State state = new State();
 
 	public static StructureDiffSettings getInstance() {
