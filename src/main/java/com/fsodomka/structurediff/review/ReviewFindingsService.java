@@ -1,6 +1,6 @@
 package com.fsodomka.structurediff.review;
 
-import com.fsodomka.structurediff.StructureDiffSettings;
+import com.fsodomka.structurediff.settings.StructureDiffSettings;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.Disposable;

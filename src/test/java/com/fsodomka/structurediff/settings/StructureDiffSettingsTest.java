@@ -1,4 +1,4 @@
-package com.fsodomka.structurediff;
+package com.fsodomka.structurediff.settings;
 
 import junit.framework.TestCase;
 

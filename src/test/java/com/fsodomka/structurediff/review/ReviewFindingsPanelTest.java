@@ -1,6 +1,6 @@
 package com.fsodomka.structurediff.review;
 
-import com.fsodomka.structurediff.StructureDiffSettings;
+import com.fsodomka.structurediff.settings.StructureDiffSettings;
 import com.intellij.openapi.application.impl.NonBlockingReadActionImpl;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;

@@ -1,4 +1,4 @@
-package com.fsodomka.structurediff;
+package com.fsodomka.structurediff.source;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.util.io.FileUtil;

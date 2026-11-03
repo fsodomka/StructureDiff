@@ -2,6 +2,7 @@ package com.fsodomka.structurediff;
 
 import com.fsodomka.structurediff.DiagnosticMembers.Diagnostics;
 import com.fsodomka.structurediff.DiagnosticMembers.MemberDiagnostic;
+import com.fsodomka.structurediff.settings.DiagnosticLevel;
 import com.intellij.icons.AllIcons;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.application.ReadAction;
@@ -31,7 +32,7 @@ public class DiagnosticMembersTest extends BasePlatformTestCase {
 	}
 
 	private Diagnostics compute(List<FileDiff> files) {
-		return ReadAction.compute(() -> DiagnosticMembers.prepare(getProject(), files, EnumSet.allOf(DiagnosticMembers.Level.class), new HashMap<>()).get());
+		return ReadAction.compute(() -> DiagnosticMembers.prepare(getProject(), files, EnumSet.allOf(DiagnosticLevel.class), new HashMap<>()).get());
 	}
 
 	public void testMapsTheDaemonsErrorsToTheirMember() {
@@ -58,7 +59,7 @@ public class DiagnosticMembersTest extends BasePlatformTestCase {
 		myFixture.doHighlighting();
 
 		Diagnostics result = ReadAction.compute(() -> DiagnosticMembers.prepare(getProject(),
-				List.of(file(file.getPath(), FileStatus.MODIFIED)), EnumSet.of(DiagnosticMembers.Level.WARNING), new HashMap<>()).get());
+				List.of(file(file.getPath(), FileStatus.MODIFIED)), EnumSet.of(DiagnosticLevel.WARNING), new HashMap<>()).get());
 
 		// analysed, but its error is not shown
 		assertEquals(Set.of(file.getPath()), result.analysed());

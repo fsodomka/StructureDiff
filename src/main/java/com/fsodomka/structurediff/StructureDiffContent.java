@@ -1,5 +1,8 @@
 package com.fsodomka.structurediff;
 
+import com.fsodomka.structurediff.source.BranchChangeSource;
+import com.fsodomka.structurediff.source.CommitChangeSource;
+import com.fsodomka.structurediff.source.LocalChangeSource;
 import com.intellij.execution.runners.ExecutionUtil;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.util.PropertiesComponent;

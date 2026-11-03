@@ -1,4 +1,4 @@
-package com.fsodomka.structurediff;
+package com.fsodomka.structurediff.source;
 
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
@@ -32,7 +32,7 @@ import java.util.stream.Collectors;
  * Changes of the branch since it forked from main, plus the uncommitted changes, as one change per file from the merge base
  * to the working tree, like a merge request shows them. Repositories without main or master show their uncommitted changes.
  */
-final class BranchChangeSource implements ChangeSource {
+public final class BranchChangeSource implements ChangeSource {
 	private static final Logger LOG = Logger.getInstance(BranchChangeSource.class);
 	/** Base branches in order of preference; the remote-tracking branch is what a merge request compares to, even with a stale local one. */
 	private static final List<String> BASES = List.of("origin/main", "main", "origin/master", "master");
@@ -45,7 +45,7 @@ final class BranchChangeSource implements ChangeSource {
 	private record MergeBase(String key, String revision) {
 	}
 
-	BranchChangeSource(Project project) {
+	public BranchChangeSource(Project project) {
 		this.project = project;
 		local = new LocalChangeSource(project);
 	}
@@ -120,7 +120,7 @@ final class BranchChangeSource implements ChangeSource {
 	}
 
 	/** {@code vs origin/main}, or null when no repository has a base branch; reads in-memory repository state only. */
-	String title() {
+	public String title() {
 		String bases = GitRepositoryManager.getInstance(project).getRepositories().stream()
 				.map(BranchChangeSource::baseBranch).filter(Objects::nonNull).map(GitBranch::getName)
 				.distinct().collect(Collectors.joining(", "));

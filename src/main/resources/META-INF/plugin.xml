@@ -81,8 +81,8 @@
         <toolWindow id="Member History" anchor="bottom" icon="AllIcons.Vcs.History" canCloseContents="true"
                     factoryClass="com.fsodomka.structurediff.history.MemberHistoryToolWindowFactory"/>
         <postStartupActivity implementation="com.fsodomka.structurediff.review.ReviewFindingsStartup"/>
-        <applicationService serviceImplementation="com.fsodomka.structurediff.StructureDiffSettings"/>
-        <applicationConfigurable parentId="tools" instance="com.fsodomka.structurediff.StructureDiffConfigurable"
+        <applicationService serviceImplementation="com.fsodomka.structurediff.settings.StructureDiffSettings"/>
+        <applicationConfigurable parentId="tools" instance="com.fsodomka.structurediff.settings.StructureDiffConfigurable"
                                  id="com.fsodomka.structurediff.settings" displayName="Structure Diff"/>
         <notificationGroup id="Structure Diff" displayType="BALLOON"/>
         <errorHandler implementation="com.intellij.diagnostic.JetBrainsMarketplaceErrorReportSubmitter"/>

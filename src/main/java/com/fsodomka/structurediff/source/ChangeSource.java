@@ -1,4 +1,4 @@
-package com.fsodomka.structurediff;
+package com.fsodomka.structurediff.source;
 
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.vcs.FilePath;
@@ -7,8 +7,8 @@ import com.intellij.openapi.vcs.changes.Change;
 import java.util.Collection;
 import java.util.List;
 
-/** Where {@link StructureDiffPanel} gets its changes from. */
-interface ChangeSource {
+/** Where the Structure Diff panel gets its changes from. */
+public interface ChangeSource {
 	/** Changes to show; called on a pooled thread. */
 	Collection<Change> changes();
 

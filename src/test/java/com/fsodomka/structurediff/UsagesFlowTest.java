@@ -2,6 +2,7 @@ package com.fsodomka.structurediff;
 
 import com.fsodomka.structurediff.UsagesPanel.Entry;
 import com.fsodomka.structurediff.UsagesPanel.Heading;
+import com.fsodomka.structurediff.source.ChangeSource;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.impl.NonBlockingReadActionImpl;

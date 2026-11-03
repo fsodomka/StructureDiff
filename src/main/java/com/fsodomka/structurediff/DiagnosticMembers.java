@@ -1,5 +1,6 @@
 package com.fsodomka.structurediff;
 
+import com.fsodomka.structurediff.settings.DiagnosticLevel;
 import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerEx;
 import com.intellij.codeInsight.daemon.impl.HighlightInfo;
 import com.intellij.icons.AllIcons;
@@ -32,32 +33,15 @@ import java.util.function.Supplier;
 final class DiagnosticMembers {
 	private static final Logger LOG = Logger.getInstance(DiagnosticMembers.class);
 
-	/** The severities shown, each turned on in the settings. */
-	enum Level {
-		ERROR("Error"), WARNING("Warning"), WEAK_WARNING("Weak warning");
-
-		final String text;
-
-		Level(String text) {
-			this.text = text;
-		}
-
-		/** The level of a severity of weak warning or above. */
-		static Level of(HighlightSeverity severity) {
-			return severity.compareTo(HighlightSeverity.ERROR) >= 0 ? ERROR
-					: severity.compareTo(HighlightSeverity.WARNING) >= 0 ? WARNING : WEAK_WARNING;
-		}
-	}
-
 	/** One diagnostic; {@code keyPath} as in {@code MemberFinding}, empty when it is in no member. */
 	record MemberDiagnostic(List<String> keyPath, String message, HighlightSeverity severity, int offset) {
 		/** The Problems view's outlined marks, colored in both themes and unlike a review finding's filled icon. */
 		Icon icon() {
-			return level() == Level.ERROR ? AllIcons.Nodes.ErrorIntroduction : AllIcons.Nodes.WarningIntroduction;
+			return level() == DiagnosticLevel.ERROR ? AllIcons.Nodes.ErrorIntroduction : AllIcons.Nodes.WarningIntroduction;
 		}
 
-		Level level() {
-			return Level.of(severity);
+		DiagnosticLevel level() {
+			return DiagnosticLevel.of(severity);
 		}
 	}
 
@@ -80,7 +64,7 @@ final class DiagnosticMembers {
 	 * Takes the open documents of {@code files} on the EDT and returns their diagnostics, to run in a read action on a
 	 * pooled thread. {@code cache} is kept by the caller across calls and only touched by the returned supplier.
 	 */
-	static Supplier<Diagnostics> prepare(Project project, List<FileDiff> files, Set<Level> shown,
+	static Supplier<Diagnostics> prepare(Project project, List<FileDiff> files, Set<DiagnosticLevel> shown,
 										 Map<String, CachedKeyPaths> cache) {
 		Map<String, VirtualFile> open = new HashMap<>();
 		for (VirtualFile file : FileEditorManager.getInstance(project).getOpenFiles()) {
@@ -97,7 +81,7 @@ final class DiagnosticMembers {
 		return () -> compute(project, targets, Set.copyOf(shown), cache);
 	}
 
-	private static Diagnostics compute(Project project, List<Target> targets, Set<Level> shown,
+	private static Diagnostics compute(Project project, List<Target> targets, Set<DiagnosticLevel> shown,
 									   Map<String, CachedKeyPaths> cache) {
 		Map<String, List<MemberDiagnostic>> byPath = new HashMap<>();
 		Set<String> analysed = new HashSet<>();
@@ -110,7 +94,7 @@ final class DiagnosticMembers {
 			List<HighlightInfo> infos = new ArrayList<>();
 			DaemonCodeAnalyzerEx.processHighlights(target.document(), project, HighlightSeverity.WEAK_WARNING, 0, target.text().length(), info -> {
 				if (info.getDescription() != null && info.getStartOffset() <= target.text().length()
-						&& shown.contains(Level.of(info.getSeverity()))) {
+						&& shown.contains(DiagnosticLevel.of(info.getSeverity()))) {
 					infos.add(info);
 				}
 				return true;

@@ -1,4 +1,4 @@
-package com.fsodomka.structurediff;
+package com.fsodomka.structurediff.source;
 
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
@@ -17,12 +17,12 @@ import java.util.List;
 import java.util.Objects;
 
 /** Uncommitted changes of the change list, plus unversioned project files. */
-final class LocalChangeSource implements ChangeSource {
+public final class LocalChangeSource implements ChangeSource {
 	private final Project project;
 	/** Whether the change list finished its first update after VCS initialization. */
 	private volatile boolean vcsReady;
 
-	LocalChangeSource(Project project) {
+	public LocalChangeSource(Project project) {
 		this.project = project;
 	}
 

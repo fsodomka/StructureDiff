@@ -1,4 +1,4 @@
-package com.fsodomka.structurediff;
+package com.fsodomka.structurediff.settings;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
@@ -61,16 +61,16 @@ public final class StructureDiffSettings implements PersistentStateComponent<Str
 	}
 
 	/** The diagnostic levels turned on; empty when none are shown. */
-	public Set<DiagnosticMembers.Level> diagnosticLevels() {
-		Set<DiagnosticMembers.Level> levels = EnumSet.noneOf(DiagnosticMembers.Level.class);
+	public Set<DiagnosticLevel> diagnosticLevels() {
+		Set<DiagnosticLevel> levels = EnumSet.noneOf(DiagnosticLevel.class);
 		if (state.showErrors) {
-			levels.add(DiagnosticMembers.Level.ERROR);
+			levels.add(DiagnosticLevel.ERROR);
 		}
 		if (state.showWarnings) {
-			levels.add(DiagnosticMembers.Level.WARNING);
+			levels.add(DiagnosticLevel.WARNING);
 		}
 		if (state.showWeakWarnings) {
-			levels.add(DiagnosticMembers.Level.WEAK_WARNING);
+			levels.add(DiagnosticLevel.WEAK_WARNING);
 		}
 		return levels;
 	}

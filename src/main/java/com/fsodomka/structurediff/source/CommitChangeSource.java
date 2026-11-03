@@ -1,4 +1,4 @@
-package com.fsodomka.structurediff;
+package com.fsodomka.structurediff.source;
 
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.project.Project;
@@ -32,7 +32,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * of several selected commits. The log tab is created, disposed and recreated with the log, so it is looked up every second
  * while the tool window is showing.
  */
-final class CommitChangeSource implements ChangeSource, Disposable {
+public final class CommitChangeSource implements ChangeSource, Disposable {
 	private static final Logger LOG = Logger.getInstance(CommitChangeSource.class);
 	/** VcsLogContentProvider.MAIN_LOG_ID of 2024.2, which later versions removed; see {@link #mainLogUi}. */
 	private static final String MAIN_LOG_ID = "MAIN";
@@ -68,7 +68,7 @@ final class CommitChangeSource implements ChangeSource, Disposable {
 	/** Selection that differed from {@link #commitIds} on the previous poll without the browser loading its changes. */
 	private List<Integer> pendingIds;
 
-	CommitChangeSource(Project project, JComponent component) {
+	public CommitChangeSource(Project project, JComponent component) {
 		this.project = project;
 		this.component = component;
 		attach();
@@ -87,12 +87,12 @@ final class CommitChangeSource implements ChangeSource, Disposable {
 	}
 
 	/** Top commit selected in the log; null when nothing is selected or the log is not open. */
-	CommitId firstCommit() {
+	public CommitId firstCommit() {
 		return firstCommit;
 	}
 
 	/** Number of commits selected in the log. */
-	int commitCount() {
+	public int commitCount() {
 		return commitIds.size();
 	}
 

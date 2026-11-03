@@ -1,4 +1,4 @@
-package com.fsodomka.structurediff;
+package com.fsodomka.structurediff.settings;
 
 import com.fsodomka.structurediff.review.ReviewFindingsService;
 import com.intellij.openapi.application.ApplicationManager;
@@ -91,7 +91,7 @@ final class StructureDiffConfigurable implements SearchableConfigurable {
 		}
 		StructureDiffSettings settings = StructureDiffSettings.getInstance();
 		boolean dirChanged = !dir.equals(settings.reviewsDir());
-		Set<DiagnosticMembers.Level> levels = settings.diagnosticLevels();
+		Set<DiagnosticLevel> levels = settings.diagnosticLevels();
 		StructureDiffSettings.State state = settings.getState();
 		state.reviewsDir = dir;
 		state.skillCommand = skillCommand.getText().strip();
