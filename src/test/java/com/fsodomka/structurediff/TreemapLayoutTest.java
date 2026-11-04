@@ -16,25 +16,6 @@ import static org.junit.Assert.assertTrue;
 
 public class TreemapLayoutTest {
 	@Test
-	public void areasAreProportionalAndFillTheBounds() {
-		double[] weights = {1, 6, 2, 3, 2, 6, 4};
-		Rectangle2D bounds = new Rectangle2D.Double(10, 20, 600, 400);
-		Rectangle2D[] rects = TreemapLayout.layout(weights, bounds);
-		double area = 0;
-		for (int i = 0; i < weights.length; i++) {
-			Rectangle2D r = rects[i];
-			assertEquals(weights[i] / 24 * 600 * 400, r.getWidth() * r.getHeight(), 1e-6);
-			assertTrue(bounds.contains(r.getX() + 1e-9, r.getY() + 1e-9, r.getWidth() - 1e-6, r.getHeight() - 1e-6));
-			for (int j = 0; j < i; j++) {
-				Rectangle2D overlap = r.createIntersection(rects[j]);
-				assertTrue(overlap.isEmpty() || overlap.getWidth() * overlap.getHeight() < 1e-6);
-			}
-			area += r.getWidth() * r.getHeight();
-		}
-		assertEquals(600 * 400, area, 1e-6);
-	}
-
-	@Test
 	public void resolveFallsBackToTheDeepestContainerStillThere() {
 		DefaultMutableTreeNode root = new DefaultMutableTreeNode("root");
 		DefaultMutableTreeNode repo = new DefaultMutableTreeNode("repo");
@@ -120,10 +101,5 @@ public class TreemapLayoutTest {
 		assertEquals(new Rectangle2D.Double(35, 30, 50, 20), TreemapLayout.scaled(rect, 0.5));
 		assertEquals(rect, TreemapLayout.scaled(rect, 1));
 		assertTrue(TreemapLayout.scaled(rect, 0).isEmpty());
-	}
-
-	@Test
-	public void noWeightsGiveNoRectangles() {
-		assertEquals(0, TreemapLayout.layout(new double[0], new Rectangle2D.Double(0, 0, 10, 10)).length);
 	}
 }

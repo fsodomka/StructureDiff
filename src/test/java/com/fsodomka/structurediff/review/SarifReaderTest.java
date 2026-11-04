@@ -1,9 +1,7 @@
 package com.fsodomka.structurediff.review;
 
-import com.intellij.openapi.util.io.FileUtil;
 import org.junit.Test;
 
-import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -82,11 +80,8 @@ public class SarifReaderTest {
 	}
 
 	@Test
-	public void decodesUris() {
-		assertEquals("src/My File.java", SarifReader.path("src/My%20File.java"));
-		Path absolute = Path.of(System.getProperty("java.io.tmpdir"), "A b.java").toAbsolutePath();
-		assertEquals(FileUtil.toSystemIndependentName(absolute.toString()), SarifReader.path(absolute.toUri().toString()));
-		// not URIs, or not file URIs: kept
+	/** Decoding is checked by SarifPathProperties. */
+	public void keepsWhatIsNotAnEncodedPathOrFileUri() {
 		assertEquals("src/A b.java", SarifReader.path("src/A b.java"));
 		assertEquals("C:/src/A.java", SarifReader.path("C:/src/A.java"));
 		assertEquals("https://example.com/A.java", SarifReader.path("https://example.com/A.java"));

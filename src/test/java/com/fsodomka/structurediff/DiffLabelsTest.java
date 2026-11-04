@@ -13,11 +13,8 @@ public class DiffLabelsTest extends TestCase {
 		return new MemberDiff(label, label, label, beforeLabel, null, status, 0, 0, added, removed, true, 0, List.of());
 	}
 
-	public void testShortenStripsGenericsAndCutsLongParameterLists() {
-		assertEquals("foo(List, int): Pair", DiffLabels.shorten("foo(List<Map<A, B>>, int): Pair<X, Y>"));
-		String longParameters = "bar(String first, String second, String third, String fourth, String fifth)";
-		assertEquals("bar(String first, …)", DiffLabels.shorten(longParameters));
-		// unbalanced brackets are kept as they are
+	/** Erasing and cutting are checked by DiffLabelsProperties. */
+	public void testShortenKeepsUnbalancedBrackets() {
 		assertEquals("a < b", DiffLabels.shorten("a < b"));
 	}
 

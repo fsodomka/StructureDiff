@@ -74,7 +74,9 @@ final class ReviewAnchor {
 		}
 		CharSequence text = document.getImmutableCharSequence();
 		int offset = finding.offset();
-		int found = offset >= 0 && StringUtil.startsWith(text, offset, snippet) ? offset : StringUtil.indexOf(text, snippet);
+
+		// the file may have shrunk since the review
+		int found = offset >= 0 && offset <= text.length() && StringUtil.startsWith(text, offset, snippet) ? offset : StringUtil.indexOf(text, snippet);
 		if (found < 0) {
 			return new Anchor(Status.GONE, 0, 0);
 		}

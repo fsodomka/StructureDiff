@@ -87,7 +87,8 @@ public final class StructureDiffSettings implements PersistentStateComponent<Str
 		if (dir == null) {
 			return null;
 		}
-		String normalized = dir.strip().replace('\\', '/').replaceAll("/+", "/").replaceAll("^\\./|/$", "");
+		// blanks around separators too, where they would end or start a name
+		String normalized = dir.strip().replace('\\', '/').replaceAll("\\s*/\\s*", "/").replaceAll("/+", "/").replaceAll("^\\./|/$", "");
 		if (normalized.isEmpty() || normalized.startsWith("/") || normalized.contains(":")) {
 			return null;
 		}
@@ -106,8 +107,9 @@ public final class StructureDiffSettings implements PersistentStateComponent<Str
 		catch (InvalidPathException e) {
 			return null;
 		}
-		// drops interior "." parts
-		return Path.of(normalized).normalize().toString().replace('\\', '/');
+		// drops "." parts; only them is the root itself
+		String result = Path.of(normalized).normalize().toString().replace('\\', '/');
+		return result.isEmpty() ? null : result;
 	}
 
 	@Override
