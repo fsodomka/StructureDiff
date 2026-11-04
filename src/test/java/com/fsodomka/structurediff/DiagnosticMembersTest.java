@@ -6,7 +6,8 @@ import com.fsodomka.structurediff.diff.FileDiff;
 import com.fsodomka.structurediff.settings.DiagnosticLevel;
 import com.intellij.icons.AllIcons;
 import com.intellij.lang.annotation.HighlightSeverity;
-import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
@@ -33,7 +34,7 @@ public class DiagnosticMembersTest extends BasePlatformTestCase {
 	}
 
 	private Diagnostics compute(List<FileDiff> files) {
-		return ReadAction.compute(() -> DiagnosticMembers.prepare(getProject(), files, EnumSet.allOf(DiagnosticLevel.class), new HashMap<>()).get());
+		return ApplicationManager.getApplication().runReadAction((Computable<Diagnostics>) () -> DiagnosticMembers.prepare(getProject(), files, EnumSet.allOf(DiagnosticLevel.class), new HashMap<>()).get());
 	}
 
 	public void testMapsTheDaemonsErrorsToTheirMember() {
@@ -59,7 +60,7 @@ public class DiagnosticMembersTest extends BasePlatformTestCase {
 		VirtualFile file = myFixture.configureByText("A.java", BROKEN).getVirtualFile();
 		myFixture.doHighlighting();
 
-		Diagnostics result = ReadAction.compute(() -> DiagnosticMembers.prepare(getProject(),
+		Diagnostics result = ApplicationManager.getApplication().runReadAction((Computable<Diagnostics>) () -> DiagnosticMembers.prepare(getProject(),
 				List.of(file(file.getPath(), FileStatus.MODIFIED)), EnumSet.of(DiagnosticLevel.WARNING), new HashMap<>()).get());
 
 		// analysed, but its error is not shown

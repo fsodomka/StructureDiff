@@ -1,7 +1,8 @@
 package com.fsodomka.structurediff.review;
 
 import com.fsodomka.structurediff.review.FindingMembers.MemberFinding;
-import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 
@@ -36,7 +37,7 @@ public class FindingMembersTest extends BasePlatformTestCase {
 				new Placement(finding("gone", "a.xml", 4, 0), root, file, ReviewAnchor.Status.GONE, null),
 				new Placement(finding("missing", "Missing.xml", 1, 1), root, null, ReviewAnchor.Status.MISSING_FILE, null));
 
-		Map<String, List<MemberFinding>> result = ReadAction.compute(() -> FindingMembers.prepare(getProject(), placements).get());
+		Map<String, List<MemberFinding>> result = ApplicationManager.getApplication().runReadAction((Computable<Map<String, List<MemberFinding>>>) () -> FindingMembers.prepare(getProject(), placements).get());
 
 		List<MemberFinding> found = result.get(file.getPath());
 		// sorted by rank, most severe first
@@ -60,14 +61,14 @@ public class FindingMembersTest extends BasePlatformTestCase {
 		com.intellij.openapi.editor.Document document = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getDocument(file);
 		assertNotNull(document);
 
-		ReadAction.compute(() -> FindingMembers.prepare(getProject(), placements).get());
+		ApplicationManager.getApplication().runReadAction((Runnable) () -> FindingMembers.prepare(getProject(), placements).get());
 		FindingMembers.CachedKeyPaths first = cache.get(file.getPath());
-		ReadAction.compute(() -> FindingMembers.prepare(getProject(), placements).get());
+		ApplicationManager.getApplication().runReadAction((Runnable) () -> FindingMembers.prepare(getProject(), placements).get());
 		assertSame(first, cache.get(file.getPath()));
 
 		// another finding file: the entries of files without findings are dropped
 		VirtualFile other = myFixture.addFileToProject("b.xml", TEXT).getVirtualFile();
-		ReadAction.compute(() -> FindingMembers.prepare(getProject(),
+		ApplicationManager.getApplication().runReadAction((Runnable) () -> FindingMembers.prepare(getProject(),
 				List.of(new Placement(finding("other", "b.xml", 4, 2), other.getParent(), other, ReviewAnchor.Status.EXACT, null))).get());
 		assertEquals(java.util.Set.of(other.getPath()), cache.keySet());
 	}

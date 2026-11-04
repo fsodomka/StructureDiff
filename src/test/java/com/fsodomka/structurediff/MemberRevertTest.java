@@ -3,7 +3,8 @@ package com.fsodomka.structurediff;
 import com.fsodomka.structurediff.diff.FileDiff;
 import com.fsodomka.structurediff.diff.MemberDiff;
 import com.intellij.ide.highlighter.JavaFileType;
-import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 
@@ -27,7 +28,7 @@ public class MemberRevertTest extends BasePlatformTestCase {
 	private String revert(String after, String current, FileStatus status, String method) {
 		FileDiff file = new FileDiff(null, "A.java", JavaFileType.INSTANCE, FileStatus.MODIFIED, BEFORE, after, 1, 1, null);
 		List<MemberDiff> path = List.of(member("A", FileStatus.MODIFIED), member(method + "()", status));
-		MemberRevert.Result result = ReadAction.compute(() ->
+		MemberRevert.Result result = ApplicationManager.getApplication().runReadAction((Computable<MemberRevert.Result>) () ->
 				MemberRevert.compute(getProject(), file, "A.java", JavaFileType.INSTANCE, current, path));
 		if (result.error() != null) {
 			return "error: " + result.error();
@@ -55,7 +56,7 @@ public class MemberRevertTest extends BasePlatformTestCase {
 		MemberDiff changed = new MemberDiff("b(int, int): void", "b(int): void", "b(int, int): void", "b(int): void", null,
 				FileStatus.MODIFIED, 0, 0, 1, 1, false, 0, List.of());
 		List<MemberDiff> path = List.of(member("A", FileStatus.MODIFIED), changed);
-		MemberRevert.Result result = ReadAction.compute(() ->
+		MemberRevert.Result result = ApplicationManager.getApplication().runReadAction((Computable<MemberRevert.Result>) () ->
 				MemberRevert.compute(getProject(), file, "A.java", JavaFileType.INSTANCE, after, path));
 		assertNull(result.error());
 		MemberRevert.Edit edit = result.edit();
@@ -78,7 +79,7 @@ public class MemberRevertTest extends BasePlatformTestCase {
 		String after = before.replace("void b(int x)", "void b(int x, int z)").replace("\tvoid d() {}\n\n", "");
 		FileDiff file = new FileDiff(null, "A.java", JavaFileType.INSTANCE, FileStatus.MODIFIED, before, after, 1, 1, null);
 		List<MemberDiff> path = List.of(member("A", FileStatus.MODIFIED), member("d(): void", FileStatus.DELETED));
-		MemberRevert.Result result = ReadAction.compute(() ->
+		MemberRevert.Result result = ApplicationManager.getApplication().runReadAction((Computable<MemberRevert.Result>) () ->
 				MemberRevert.compute(getProject(), file, "A.java", JavaFileType.INSTANCE, after, path));
 		assertNull(result.error());
 		MemberRevert.Edit edit = result.edit();

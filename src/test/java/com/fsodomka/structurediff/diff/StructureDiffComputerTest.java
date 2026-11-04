@@ -1,6 +1,7 @@
 package com.fsodomka.structurediff.diff;
 
-import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vcs.changes.Change;
@@ -34,7 +35,7 @@ public class StructureDiffComputerTest extends BasePlatformTestCase {
 		FilePath path = VcsUtil.getFilePath("/project/A.java", false);
 		Change change = new Change(new SimpleContentRevision(before, path, "1"), new SimpleContentRevision(after, path, "2"));
 		FileDiff loaded = RevisionContent.load(change, new HashMap<>(), null);
-		return ReadAction.compute(() -> StructureDiffComputer.withMembers(getProject(), loaded));
+		return ApplicationManager.getApplication().runReadAction((Computable<FileDiff>) () -> StructureDiffComputer.withMembers(getProject(), loaded));
 	}
 
 	/** The member with {@code key} anywhere in the file's members. */

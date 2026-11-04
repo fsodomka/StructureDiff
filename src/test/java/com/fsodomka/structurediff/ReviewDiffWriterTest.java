@@ -2,7 +2,7 @@ package com.fsodomka.structurediff;
 
 import com.intellij.openapi.diff.impl.patch.PatchReader;
 import com.intellij.openapi.diff.impl.patch.TextFilePatch;
-import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.NioFiles;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.SimpleContentRevision;
@@ -31,7 +31,7 @@ public class ReviewDiffWriterTest extends BasePlatformTestCase {
 	@Override
 	protected void tearDown() throws Exception {
 		try {
-			FileUtil.delete(root);
+			NioFiles.deleteRecursively(root);
 		}
 		finally {
 			super.tearDown();

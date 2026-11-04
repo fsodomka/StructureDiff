@@ -2,7 +2,8 @@ package com.fsodomka.structurediff;
 
 import com.fsodomka.structurediff.MemberLinks.Link;
 import com.fsodomka.structurediff.MemberLinks.Links;
-import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.util.Computable;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
@@ -55,11 +56,11 @@ public class MemberLinksTest extends BasePlatformTestCase {
 	}
 
 	private Links links(PsiElement element) {
-		return ReadAction.compute(() -> MemberLinks.links(getProject(), element));
+		return ApplicationManager.getApplication().runReadAction((Computable<Links>) () -> MemberLinks.links(getProject(), element));
 	}
 
 	private Links round() {
-		return links(ReadAction.compute(() -> moneyClass().findMethodsByName("round", false)[0]));
+		return links(ApplicationManager.getApplication().runReadAction((Computable<PsiElement>) () -> moneyClass().findMethodsByName("round", false)[0]));
 	}
 
 	private static List<String> describe(List<Link> links) {
@@ -83,7 +84,7 @@ public class MemberLinksTest extends BasePlatformTestCase {
 	}
 
 	public void testCalleesInOtherFilesAreExternal() {
-		PsiElement total = ReadAction.compute(() -> JavaPsiFacade.getInstance(getProject()).findClass("p.Invoice", GlobalSearchScope.allScope(getProject())).getMethods()[0]);
+		PsiElement total = ApplicationManager.getApplication().runReadAction((Computable<PsiElement>) () -> JavaPsiFacade.getInstance(getProject()).findClass("p.Invoice", GlobalSearchScope.allScope(getProject())).getMethods()[0]);
 		assertEquals(List.of("Money.java Money > round(int): int x2 external"),
 				describe(links(total).callees().stream().filter(l -> !l.keys().equals(List.of("Money"))).toList()));
 	}
@@ -116,7 +117,7 @@ public class MemberLinksTest extends BasePlatformTestCase {
 			calls.append("m.helper();\n");
 		}
 		myFixture.addFileToProject("p/Busy.java", "package p;\nclass Busy {\n void all(Money m) {\n" + calls + "}\n}\n");
-		PsiElement all = ReadAction.compute(() -> JavaPsiFacade.getInstance(getProject()).findClass("p.Busy", GlobalSearchScope.allScope(getProject())).getMethods()[0]);
+		PsiElement all = ApplicationManager.getApplication().runReadAction((Computable<PsiElement>) () -> JavaPsiFacade.getInstance(getProject()).findClass("p.Busy", GlobalSearchScope.allScope(getProject())).getMethods()[0]);
 		Links links = links(all);
 		assertTrue(links.calleesCapped());
 		assertTrue(links.callees().stream().mapToInt(Link::count).sum() < MemberLinks.RESOLVE_CAP);

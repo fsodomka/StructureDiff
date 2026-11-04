@@ -1,7 +1,7 @@
 package com.fsodomka.structurediff.source;
 
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.io.NioFiles;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
 import com.intellij.openapi.vcs.VcsDirectoryMapping;
 import com.intellij.openapi.vcs.changes.Change;
@@ -37,7 +37,7 @@ public class BranchChangeSourceTest extends BasePlatformTestCase {
 	protected void tearDown() throws Exception {
 		try {
 			ProjectLevelVcsManager.getInstance(getProject()).setDirectoryMappings(List.of());
-			FileUtil.delete(root);
+			NioFiles.deleteRecursively(root);
 		}
 		finally {
 			super.tearDown();
