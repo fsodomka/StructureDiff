@@ -504,7 +504,7 @@ final class TreemapPanel extends JComponent {
 		// border and label keep the status color. Only the header of a container showing its children, like the flash
 		// below, so a class is not taken for related through one of its members
 		if (!tree.isPathSelected(new TreePath(node.getPath())) && related.test(node)) {
-			g.setColor(StructureDiffPanel.RELATED);
+			g.setColor(DiffTreeRenderer.RELATED);
 			g.fill(nested ? new Rectangle(r.x, r.y, r.width, header) : r);
 		}
 		g.setColor(ColorUtil.withAlpha(color, 0.6));

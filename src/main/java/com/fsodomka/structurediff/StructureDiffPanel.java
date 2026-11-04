@@ -1,6 +1,5 @@
 package com.fsodomka.structurediff;
 
-import com.fsodomka.structurediff.ChangeFlashes.Flash;
 import com.fsodomka.structurediff.DiagnosticMembers.MemberDiagnostic;
 import com.fsodomka.structurediff.DiffTreeNodes.Ghost;
 import com.fsodomka.structurediff.DiffTreeNodes.RepoNode;
@@ -31,10 +30,7 @@ import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.FilePath;
-import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangesUtil;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -83,11 +79,6 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private final ViewOptions options = new ViewOptions();
 	private final ChangeFlashes flashes = new ChangeFlashes(this::repaintViews, () -> show(this.files, false),
 			() -> options.get(Option.TREEMAP));
-	/**
-	 * Background of the changed members that use or are used by the selected one: soft amber, like the editor's search
-	 * result highlight, so it is not taken for the blue selection and sits well under the green, blue and grey status text.
-	 */
-	static final JBColor RELATED = new JBColor(0xFFEFC2, 0x6B5C1F);
 	private final AtomicInteger generation = new AtomicInteger();
 	private final SimpleColoredComponent summary = new SimpleColoredComponent();
 	/** Finding counts per severity, after {@link #summary}; one icon each, which a {@link SimpleColoredComponent} cannot show. */
@@ -109,14 +100,13 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	/** Set while {@link #show} replaces the tree, whose selection events are not the user's. */
 	private boolean rebuilding;
 	private final TreemapPanel treemap;
+	private final DiffTreeRenderer renderer;
 	/** A refresh is in progress, from the start until the first one finishes; shown by the treemap, the tree paints busy. */
 	private boolean loading = true;
 	/** Paths of the unversioned files in {@link #files}; they are loaded even when hidden, so the toggle needs no refresh. */
 	private volatile Set<String> unversionedPaths = Set.of();
 	/** Paths of the files in test sources, marked as such in the tree; looked up off the EDT, as the index may be slow. */
 	private volatile Set<String> testPaths = Set.of();
-	/** Package of each file in a source root, relative to the package all changed code shares; shown instead of its directory. */
-	private Map<String, String> packages = Map.of();
 	/** Whether the panel is showing; a hidden panel (other mode, closed tool window) does not refresh. */
 	private volatile boolean showing;
 	/** A refresh or findings update was skipped while hidden; done when the panel shows again. */
@@ -139,6 +129,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				node -> DiffTreeNodes.keyPart(node.getUserObject()), selection::jumpToSource, selection::openSelected,
 				signals::findingsOf, signals::showFindings, signals::diagnosticsOf, signals::notAnalysed, signals::openDiagnostic,
 				this::isTestFile, flashes::get, usages::isRelated, () -> this.loading, () -> tree.getEmptyText().getText());
+		renderer = new DiffTreeRenderer(project, signals, flashes, usages);
 
 		installTree();
 		updateContent();
@@ -153,7 +144,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		// "Nothing to show" only once the first refresh finished
 		tree.getEmptyText().clear().appendLine(AnimatedIcon.Default.INSTANCE, "Loading…",
 				SimpleTextAttributes.REGULAR_ATTRIBUTES, null);
-		tree.setCellRenderer(new Renderer());
+		tree.setCellRenderer(renderer);
 		ToolTipManager.sharedInstance().registerComponent(tree);
 		// matches the shown label, not the user object's toString (a FileDiff's holds the whole source text);
 		// searches collapsed nodes too, expanding to the match
@@ -448,7 +439,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 						projectRoot = snapshot.projectRoot();
 						unversionedPaths = snapshot.unversioned();
 						testPaths = snapshot.tests();
-						packages = snapshot.packages();
+						renderer.update(snapshot);
 						show(snapshot.files(), highlight);
 						// the tree may show other members now, and edits may have moved the findings into other ones
 						signals.updateFindings();
@@ -625,7 +616,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		}
 		Component component = tree.getCellRenderer().getTreeCellRendererComponent(tree, node, tree.isPathSelected(path),
 				tree.isExpanded(path), node.isLeaf(), tree.getRowForPath(path), false);
-		if (!(component instanceof Renderer renderer) || renderer.getIcon() == null) {
+		if (!(component instanceof DiffTreeRenderer renderer) || renderer.getIcon() == null) {
 			return null;
 		}
 		// the renderer paints its icon at ipad.left, the signal icons last in it, the diagnostic's after the finding's
@@ -676,117 +667,5 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	@Override
 	public void dispose() {
 		flashes.stop();
-	}
-
-	private final class Renderer extends ColoredTreeCellRenderer {
-		@Override
-		public void customizeCellRenderer(@NotNull JTree tree, Object value, boolean selected, boolean expanded,
-										  boolean leaf, int row, boolean hasFocus) {
-			DefaultMutableTreeNode node = (DefaultMutableTreeNode) value;
-			Object item = node.getUserObject();
-			boolean ghost = item instanceof Ghost;
-			if (item instanceof Ghost(Object ghostItem)) {
-				item = ghostItem;
-			}
-			Flash flash = flashes.get(node);
-			// a removed node that vanished came back (removal undone): it flashes as added, not as gone
-			boolean restored = ghost && flash != null && flash.status() == FileStatus.DELETED;
-			Color background = flash == null ? null : flashBackground(flash, ghost, restored);
-			if (background == null && !selected && usages.isRelated(node)) {
-				background = RELATED;
-			}
-			if (item instanceof RepoNode(VirtualFile root)) {
-				setIcon(AllIcons.Nodes.Module);
-				append(root.getName(), SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
-				append("  " + root.getPresentableUrl(), SimpleTextAttributes.GRAYED_ATTRIBUTES);
-				setToolTipText(null);
-			}
-			else if (item instanceof FileDiff file) {
-				VirtualFile vcsRoot = vcsRoots.get(file.path());
-				String basePath = vcsRoot != null ? vcsRoot.getPath() : StringUtil.notNullize(project.getBasePath());
-				String path = DiffLabels.relativePath(file.path(), basePath);
-				int slash = path.lastIndexOf('/');
-				List<MemberFinding> found = ghost ? List.of() : signals.findingsOf(node);
-				List<MemberDiagnostic> diags = ghost ? List.of() : signals.diagnosticsOf(node);
-				setIcon(MemberSignals.withSignalIcons(withTestMark(file.fileType().getIcon(), file.path()), found, diags));
-				append(path.substring(slash + 1), attributes(restored ? FileStatus.NOT_CHANGED : file.status(), ghost && !restored, background));
-				if (file.members() != null && !ghost) {
-					int[] counts = new int[3];
-					DiffTreeNodes.count(file.members(), counts);
-					DiffLabels.appendCounts(this, counts, SimpleTextAttributes.STYLE_SMALLER);
-				}
-				if (!ghost) {
-					DiffLabels.appendLines(this, file.linesAdded(), file.linesRemoved(), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES);
-				}
-				if (!found.isEmpty()) {
-					append("  ⚠" + found.size(), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES);
-				}
-				// the package, as the source root and the package all changes share say little; the tooltip has the full path
-				String location = packages.getOrDefault(file.path(), slash > 0 ? path.substring(0, slash) : "");
-				if (!location.isEmpty()) {
-					append("  " + location, SimpleTextAttributes.GRAYED_ATTRIBUTES);
-				}
-				Change change = file.change();
-				String beforePath = change.getBeforeRevision() == null ? null : change.getBeforeRevision().getFile().getPath();
-				String moved = null;
-				if ((change.isMoved() || change.isRenamed()) && beforePath != null) {
-					// a rename shows the old name, a move the old path relative to the root
-					String shown = change.isMoved() ? DiffLabels.relativePath(beforePath, basePath) : StringUtil.getShortName(beforePath, '/');
-					append("  ← " + shown, SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES);
-					moved = (change.isMoved() ? "Moved from " : "Renamed from ") + FileUtil.toSystemDependentName(beforePath);
-				}
-				String lines = file.linesAdded() + file.linesRemoved() == 0 ? null : DiffLabels.linesText(file.linesAdded(), file.linesRemoved());
-				StringBuilder tip = new StringBuilder("<html>").append(StringUtil.escapeXmlEntities(FileUtil.toSystemDependentName(path)));
-				if (moved != null) {
-					tip.append("<br>").append(StringUtil.escapeXmlEntities(moved));
-				}
-				if (lines != null) {
-					tip.append("<br>").append(lines);
-				}
-				setToolTipText(MemberSignals.withSignals(tip.append("</html>").toString(), found, diags, !ghost && signals.notAnalysed(node)));
-			}
-			else if (item instanceof MemberDiff member) {
-				List<MemberFinding> found = ghost ? List.of() : signals.findingsOf(node);
-				List<MemberDiagnostic> diags = ghost ? List.of() : signals.diagnosticsOf(node);
-				Icon icon = member.icon();
-				if (((DefaultMutableTreeNode) node.getParent()).getUserObject() instanceof FileDiff parent) {
-					icon = withTestMark(icon, parent.path());
-				}
-				setIcon(MemberSignals.withSignalIcons(icon, found, diags));
-				String shortLabel = DiffLabels.shorten(member.label());
-				append(shortLabel, attributes(restored ? FileStatus.NOT_CHANGED : member.status(), ghost && !restored, background));
-				setToolTipText(MemberSignals.withSignals(DiffLabels.tooltip(member), found, diags, false));
-			}
-		}
-
-		/** {@code icon} with the test marker when {@code path} is in test sources, as the Project view shows test classes. */
-		private Icon withTestMark(Icon icon, String path) {
-			if (icon == null || !testPaths.contains(path)) {
-				return icon;
-			}
-			return IconManager.getInstance().createLayered(icon, AllIcons.Nodes.JunitTestMark);
-		}
-
-
-		/** The status color (removed for a ghost, added for a restored node) blended into the tree background, fading with the flash. */
-		private Color flashBackground(Flash flash, boolean ghost, boolean restored) {
-			double strength = flash.strength(System.currentTimeMillis());
-			if (strength <= 0) {
-				return null;
-			}
-			Color color = (restored ? FileStatus.ADDED : ghost ? FileStatus.DELETED : flash.status()).getColor();
-			return color == null ? null : ColorUtil.mix(tree.getBackground(), color, 0.4 * strength);
-		}
-
-		/** A ghost is grey and struck out: the node is gone after the flash. */
-		private static SimpleTextAttributes attributes(FileStatus status, boolean ghost, Color background) {
-			int style = ghost || status == FileStatus.DELETED ? SimpleTextAttributes.STYLE_STRIKEOUT : SimpleTextAttributes.STYLE_PLAIN;
-			if (background != null) {
-				// the fragment background is painted only for opaque attributes; tree cell renderers are not opaque
-				style |= SimpleTextAttributes.STYLE_OPAQUE;
-			}
-			Color foreground = ghost ? UIUtil.getInactiveTextColor() : status.getColor();
-			return new SimpleTextAttributes(background, foreground, null, style);
-		}
 	}
 }

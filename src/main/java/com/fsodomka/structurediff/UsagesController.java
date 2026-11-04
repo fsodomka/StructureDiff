@@ -44,7 +44,7 @@ final class UsagesController {
 	/** The running search; null when none runs. */
 	private CancellablePromise<Links> usagesSearch;
 	private int usagesGeneration;
-	/** The changed members related to the selected one by {@link #usages}, painted with {@link StructureDiffPanel#RELATED}; EDT only. */
+	/** The changed members related to the selected one by {@link #usages}, painted with {@link DiffTreeRenderer#RELATED}; EDT only. */
 	private Set<DefaultMutableTreeNode> relatedNodes = Set.of();
 	private final Project project;
 	private final UsagesPanel usagesPanel;
