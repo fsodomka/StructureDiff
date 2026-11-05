@@ -17,7 +17,6 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.ColoredTreeCellRenderer;
 import com.intellij.ui.IconManager;
-import com.intellij.ui.JBColor;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
@@ -34,19 +33,13 @@ import java.util.Set;
  * their status colors, signal icons, flashes and the highlight of the members related to the selection.
  */
 final class DiffTreeRenderer extends ColoredTreeCellRenderer {
-	/**
-	 * Background of the changed members that use or are used by the selected one: soft amber, like the editor's search
-	 * result highlight, so it is not taken for the blue selection and sits well under the green, blue and grey status text.
-	 */
-	static final JBColor RELATED = new JBColor(0xFFEFC2, 0x6B5C1F);
-
 	private final Project project;
 	private final MemberSignalState signals;
 	private final ChangeFlashes flashes;
 	private final UsagesController usages;
 	/** VCS root of each file path; file paths are shown relative to it. */
 	private Map<String, VirtualFile> vcsRoots = Map.of();
-	/** Paths of the files in test sources, whose icons get the test marker. */
+	/** Paths of the files in test sources, which get the test icon and their members' icons the test marker. */
 	private Set<String> testPaths = Set.of();
 	/** Package of each file in a source root, shown instead of its directory. */
 	private Map<String, String> packages = Map.of();
@@ -78,8 +71,9 @@ final class DiffTreeRenderer extends ColoredTreeCellRenderer {
 		// a removed node that vanished came back (removal undone): it flashes as added, not as gone
 		boolean restored = ghost && flash != null && flash.status() == FileStatus.DELETED;
 		Color background = flash == null ? null : flashBackground(tree, flash, ghost, restored);
-		if (background == null && !selected && usages.isRelated(node)) {
-			background = RELATED;
+		Relation relation = usages.relationOf(node);
+		if (background == null && !selected && relation != null) {
+			background = relation.background;
 		}
 		if (item instanceof RepoNode(VirtualFile root)) {
 			setIcon(AllIcons.Nodes.Module);
@@ -94,7 +88,9 @@ final class DiffTreeRenderer extends ColoredTreeCellRenderer {
 			int slash = path.lastIndexOf('/');
 			List<MemberFinding> found = ghost ? List.of() : signals.findingsOf(node);
 			List<MemberDiagnostic> diags = ghost ? List.of() : signals.diagnosticsOf(node);
-			setIcon(MemberSignals.withSignalIcons(withTestMark(file.fileType().getIcon(), file.path()), found, diags));
+			// a test file gets the test icon instead of its type's: the marker overlay its members get is easy to miss
+			Icon icon = testPaths.contains(file.path()) ? AllIcons.Nodes.Test : file.fileType().getIcon();
+			setIcon(MemberSignals.withSignalIcons(icon, found, diags));
 			append(path.substring(slash + 1), attributes(restored ? FileStatus.NOT_CHANGED : file.status(), ghost && !restored, background));
 			if (file.members() != null && !ghost) {
 				int[] counts = new int[3];
@@ -141,6 +137,9 @@ final class DiffTreeRenderer extends ColoredTreeCellRenderer {
 			setIcon(MemberSignals.withSignalIcons(icon, found, diags));
 			String shortLabel = DiffLabels.shorten(member.label());
 			append(shortLabel, attributes(restored ? FileStatus.NOT_CHANGED : member.status(), ghost && !restored, background));
+			if (relation != null) {
+				append("  " + relation.arrow, SimpleTextAttributes.GRAYED_ATTRIBUTES);
+			}
 			setToolTipText(MemberSignals.withSignals(DiffLabels.tooltip(member), found, diags, false));
 		}
 	}

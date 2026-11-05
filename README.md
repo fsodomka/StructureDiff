@@ -20,11 +20,11 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
   **Flash Changes** (briefly highlight what appeared, changed or disappeared; in the treemap, new boxes grow in and
   removals are not shown).
 - Per file and member: `+` added, `~` modified, `−` removed counts, changed lines, renames/moves, and old vs new
-  signature in the tooltip. Multiple VCS roots are grouped.
+  signature in the tooltip; test files have the test icon. Multiple VCS roots are grouped.
 - **Double-click**/**Enter** jumps to source, **middle-click** opens the diff at the member; context menu: Show Diff,
   Jump to Source, Show Member History, Copy Path.
 - **Show as Treemap** shows the changes as nested boxes sized by changed lines and colored by status (removed members
-  red). Click a box's header to zoom in, the breadcrumb or **Backspace** to zoom out; arrows move between sibling
+  red); test files have the test icon. Click a box's header to zoom in, the breadcrumb or **Backspace** to zoom out; arrows move between sibling
   boxes, **Enter** zooms in or jumps to source. Double-click, middle-click, the context menu and finding icons work as
   in the tree.
 
@@ -34,7 +34,8 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
   uses and what uses it: **Used by** and **Uses**, each split into internal (the member's own file) and external
   (other files, by module), with members nested under their class and test code marked.
 - The changed members related to the selected one are highlighted in the tree and the treemap, so you see
-  which parts of a change belong together.
+  which parts of a change belong together: amber (`↑`) for members that use it, teal (`↓`) for members it uses,
+  lavender (`↕`) for both. In the treemap the other members fade to half strength.
 - Imports, generated sources and build, configuration and text files are left out. The usages are searched again
   after you edit the files. Large searches are capped (200 callers, 2000 references resolved), shown as "capped".
 - Double-click or Enter in the panel jumps to the usage; click the header to jump to the member itself. Not available

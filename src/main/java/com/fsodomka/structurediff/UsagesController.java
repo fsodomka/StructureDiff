@@ -9,7 +9,6 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.changes.ContentRevision;
 import com.intellij.openapi.vcs.changes.CurrentContentRevision;
@@ -24,12 +23,17 @@ import org.jetbrains.concurrency.CancellablePromise;
 
 import javax.swing.*;
 import javax.swing.tree.DefaultMutableTreeNode;
-import java.util.HashSet;
+import javax.swing.tree.TreeNode;
+import javax.swing.tree.TreePath;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
-import java.util.stream.Stream;
+import java.util.function.Predicate;
 
 /** Searches the callers and callees of the selected member for the {@link UsagesPanel}, and the changed members they relate. */
 final class UsagesController {
@@ -44,8 +48,10 @@ final class UsagesController {
 	/** The running search; null when none runs. */
 	private CancellablePromise<Links> usagesSearch;
 	private int usagesGeneration;
-	/** The changed members related to the selected one by {@link #usages}, painted with {@link DiffTreeRenderer#RELATED}; EDT only. */
-	private Set<DefaultMutableTreeNode> relatedNodes = Set.of();
+	/** The changed members related to the selected one by {@link #usages}, painted with their {@link Relation}; EDT only. */
+	private Map<DefaultMutableTreeNode, Relation> relatedNodes = Map.of();
+	/** Whether the map was {@link #faded} when the running search started; EDT only. */
+	private boolean fadedOnSearch;
 	private final Project project;
 	private final UsagesPanel usagesPanel;
 	private final JTree tree;
@@ -61,9 +67,67 @@ final class UsagesController {
 		this.parent = parent;
 	}
 
-	/** Whether {@code node} is a changed member related to the selected one by the shown usages. */
-	boolean isRelated(DefaultMutableTreeNode node) {
-		return relatedNodes.contains(node);
+	/** How {@code node}, a changed member, is related to the selected one by the shown usages; null when it is not. */
+	@Nullable Relation relationOf(DefaultMutableTreeNode node) {
+		return relatedNodes.get(node);
+	}
+
+	/**
+	 * Which nodes stay at full strength while the usages are shown, for one paint: all when the map is not
+	 * {@link #faded}, otherwise those selected or inside a selected node, or that are or hold a related or selected node.
+	 */
+	Predicate<DefaultMutableTreeNode> focus() {
+		return focus(relatedNodes.keySet(), faded(), tree.getSelectionPaths());
+	}
+
+	/** {@link #focus()}; built once, so each test walks only the node's own ancestors. */
+	static Predicate<DefaultMutableTreeNode> focus(Set<DefaultMutableTreeNode> related, boolean faded,
+												   TreePath @Nullable [] selection) {
+		if (!faded) {
+			return node -> true;
+		}
+		Set<TreeNode> selected = Collections.newSetFromMap(new IdentityHashMap<>());
+		// the selected and related nodes and every node holding one
+		Set<TreeNode> holders = Collections.newSetFromMap(new IdentityHashMap<>());
+		for (TreePath path : selection == null ? new TreePath[0] : selection) {
+			selected.add((TreeNode) path.getLastPathComponent());
+			addWithAncestors((TreeNode) path.getLastPathComponent(), holders);
+		}
+		for (DefaultMutableTreeNode node : related) {
+			addWithAncestors(node, holders);
+		}
+		return node -> {
+			if (holders.contains(node)) {
+				return true;
+			}
+			for (TreeNode ancestor = node.getParent(); ancestor != null; ancestor = ancestor.getParent()) {
+				if (selected.contains(ancestor)) {
+					return true;
+				}
+			}
+			return false;
+		};
+	}
+
+	private static void addWithAncestors(TreeNode node, Set<TreeNode> result) {
+		// stops at a node already added, whose ancestors are too
+		TreeNode n = node;
+		while (n != null && result.add(n)) {
+			n = n.getParent();
+		}
+	}
+
+	private boolean faded() {
+		return faded(!relatedNodes.isEmpty(), usagesSearch != null, fadedOnSearch);
+	}
+
+	/**
+	 * Whether the members out of focus fade: while members are related, and while a search runs that started with the
+	 * map faded ({@code fadedOnSearch}). A search keeps the map as it was, so a new selection changes it at most once,
+	 * when its result comes, and stepping through members that relate none does not fade it on every step.
+	 */
+	static boolean faded(boolean related, boolean searching, boolean fadedOnSearch) {
+		return related || searching && fadedOnSearch;
 	}
 
 	/** Drops the shown usages and the highlight, cancelling a running search. */
@@ -77,15 +141,21 @@ final class UsagesController {
 	private void cancelUsagesSearch() {
 		if (usagesSearch != null) {
 			usagesSearch.cancel();
-			usagesSearch = null;
+			searchDone();
 		}
 		usagesGeneration++;
+	}
+
+	/** Drops the finished or cancelled search; repaints, as {@link #focus()} depends on whether one runs. */
+	private void searchDone() {
+		usagesSearch = null;
+		repaint.run();
 	}
 
 	/** Sets {@link #usages} and highlights the members they relate in the current tree. */
 	private void setUsages(@Nullable Links links) {
 		usages = links;
-		Set<DefaultMutableTreeNode> related = links == null ? Set.of() : relatedNodes((DefaultMutableTreeNode) tree.getModel().getRoot(), links);
+		Map<DefaultMutableTreeNode, Relation> related = links == null ? Map.of() : relatedNodes((DefaultMutableTreeNode) tree.getModel().getRoot(), links);
 		if (!related.equals(relatedNodes)) {
 			relatedNodes = related;
 			repaint.run();
@@ -119,6 +189,8 @@ final class UsagesController {
 		List<String> key = node == null ? null : DiffTreeNodes.keyOf(node);
 		int stamp = contentStamp(files);
 		boolean sameMember = key != null && key.equals(usagesKey);
+		// before cancel() drops the highlight; a search replacing a running one keeps that one's state
+		fadedOnSearch = faded();
 		if (sameMember) {
 			setUsages(usages);
 			if (stamp == usagesStamp && (usages != null || usagesSearch != null)) {
@@ -162,7 +234,7 @@ final class UsagesController {
 					if (generation != usagesGeneration) {
 						return;
 					}
-					usagesSearch = null;
+					searchDone();
 					if (links == null) {
 						showUsagesMessage("Member not found in the working copy");
 						return;
@@ -171,15 +243,21 @@ final class UsagesController {
 					usagesPanel.show(member.label(), links);
 				})
 				.submit(AppExecutorUtil.getAppExecutorService());
+		repaint.run();
 		usagesSearch.onError(e -> {
-			if (e instanceof ProcessCanceledException || e instanceof CancellationException) {
-				return;
+			// ProcessCanceledException is a CancellationException
+			boolean cancelled = e instanceof CancellationException;
+			if (!cancelled) {
+				LOG.error("Usages could not be found", e);
 			}
-			LOG.error("Usages could not be found", e);
+			// a search cancelled by anything but cancelUsagesSearch (which moves the generation on) is done too, or it
+			// would keep the map faded and block searching the member again
 			UIUtil.invokeLaterIfNeeded(() -> {
 				if (generation == usagesGeneration) {
-					usagesSearch = null;
-					showUsagesMessage("Usages could not be found");
+					searchDone();
+					if (!cancelled) {
+						showUsagesMessage("Usages could not be found");
+					}
 				}
 			});
 		});
@@ -188,11 +266,19 @@ final class UsagesController {
 	/**
 	 * The member nodes below {@code root} that hold {@code links}. A link to a member that is not in the tree highlights
 	 * the deepest code member on its path, which holds it as nested code (nested changes hidden, or an unchanged nested
-	 * member); not a class, whose unchanged members are not related to the class.
+	 * member); not a class, whose unchanged members are not related to the class. A node reached as both a caller and a
+	 * callee is {@link Relation#BOTH}.
 	 */
-	static Set<DefaultMutableTreeNode> relatedNodes(DefaultMutableTreeNode root, Links links) {
-		Set<DefaultMutableTreeNode> result = new HashSet<>();
-		for (Link link : Stream.concat(links.callers().stream(), links.callees().stream()).toList()) {
+	static Map<DefaultMutableTreeNode, Relation> relatedNodes(DefaultMutableTreeNode root, Links links) {
+		Map<DefaultMutableTreeNode, Relation> result = new HashMap<>();
+		addRelated(root, links.callers(), Relation.CALLER, result);
+		addRelated(root, links.callees(), Relation.CALLEE, result);
+		return result;
+	}
+
+	private static void addRelated(DefaultMutableTreeNode root, List<Link> links, Relation relation,
+								   Map<DefaultMutableTreeNode, Relation> result) {
+		for (Link link : links) {
 			DefaultMutableTreeNode node = DiffTreeNodes.child(root, link.file().getPath());
 			if (node == null || link.keys().isEmpty()) {
 				continue;
@@ -207,9 +293,8 @@ final class UsagesController {
 				matched++;
 			}
 			if (matched == link.keys().size() || matched > 0 && node.getUserObject() instanceof MemberDiff member && !member.container()) {
-				result.add(node);
+				result.merge(node, relation, Relation::merge);
 			}
 		}
-		return result;
 	}
 }

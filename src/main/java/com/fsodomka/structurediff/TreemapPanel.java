@@ -4,13 +4,13 @@ import com.fsodomka.structurediff.DiagnosticMembers.MemberDiagnostic;
 import com.fsodomka.structurediff.diff.FileDiff;
 import com.fsodomka.structurediff.diff.MemberDiff;
 import com.fsodomka.structurediff.review.FindingMembers.MemberFinding;
-import com.intellij.icons.AllIcons;
+import com.intellij.openapi.util.IconLoader;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.ui.AnimatedIcon;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.JBColor;
+import com.intellij.util.IconUtil;
 import com.intellij.util.ui.GraphicsUtil;
-import com.intellij.util.ui.ImageUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 
@@ -26,8 +26,8 @@ import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Rectangle2D;
-import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +40,11 @@ import java.util.function.*;
  */
 final class TreemapPanel extends JComponent {
 	private static final Color REMOVED = new JBColor(new Color(0xC7_22_2A), new Color(0xE0_5A_5A));
+	/**
+	 * The test icon's outline and glyph on a transparent disc, colorized per label color; white, as colorizing scales
+	 * the color's brightness by the pixel's.
+	 */
+	private static final Icon TEST_OUTLINE = IconLoader.getIcon("/icons/testOutline.svg", TreemapPanel.class);
 
 	private final JTree tree;
 	private final Function<DefaultMutableTreeNode, String> label;
@@ -50,7 +55,10 @@ final class TreemapPanel extends JComponent {
 	private final Predicate<DefaultMutableTreeNode> notAnalysed;
 	private final Predicate<DefaultMutableTreeNode> testFile;
 	private final Function<DefaultMutableTreeNode, ChangeFlashes.Flash> flash;
-	private final Predicate<DefaultMutableTreeNode> related;
+	private final Function<DefaultMutableTreeNode, Relation> related;
+	private final Supplier<Predicate<DefaultMutableTreeNode>> focus;
+	/** {@link #focus} for the running paint. */
+	private Predicate<DefaultMutableTreeNode> inFocus = node -> true;
 	private final BooleanSupplier loading;
 	private final Supplier<String> emptyText;
 	/** Painted rectangles, parents before their children; the last one containing a point is the deepest node there. */
@@ -65,9 +73,14 @@ final class TreemapPanel extends JComponent {
 	private final List<Hit> crumbHits = new ArrayList<>();
 	/** Weights of the nodes painted, computed once per paint. */
 	private final Map<DefaultMutableTreeNode, Double> weights = new IdentityHashMap<>();
-	/** {@link #opaqueBounds} of the test mark, null when it paints nothing; computed on first use per look and feel. */
-	private Rectangle testMarkGlyph;
-	private boolean testMarkGlyphKnown;
+	/**
+	 * The test icon in each label color painted, as colorizing renders it anew. Keyed by the ARGB value, not the theme
+	 * color: the treemap is out of the component tree while the tree is shown, so a theme switch then skips
+	 * {@link #updateUI} and a theme color key would find the old theme's icon.
+	 */
+	private final Map<Integer, Icon> testIcons = new HashMap<>();
+	/** The size {@link #testIcons} are scaled to, which follows the UI scale. */
+	private int testIconSize;
 	/**
 	 * Keys of the zoomed node's path below the root, empty when not zoomed. Keys, not nodes, because every refresh
 	 * rebuilds the tree model.
@@ -86,10 +99,12 @@ final class TreemapPanel extends JComponent {
 	 * @param diagnostics the IDE's diagnostics shown on a node, most severe first
 	 * @param notAnalysed whether a node is a changed file the IDE has not analysed
 	 * @param onDiagnostic click on a diagnostic icon, like the tree's
-	 * @param testFile  whether a node is a file in test sources, marked like the tree's icon
+	 * @param testFile  whether a node is a file in test sources, marked with the tree's test icon in the label's color
 	 * @param flash     the node's running flash, or null; the caller repaints while flashes run
-	 * @param related   whether a node uses or is used by the selected one, highlighted like the tree's row; the caller
-	 *                  repaints when it changes
+	 * @param related   how a node is related to the selected one by its usages, or null; highlighted like the tree's
+	 *                  row; the caller repaints when it changes
+	 * @param focus     for each paint, whether a node stays at full strength while the usages are shown; a box
+	 *                  without its children shown is faded when not
 	 * @param loading   whether a refresh is in progress; the caller repaints when it changes
 	 * @param emptyText shown when there is nothing to show, like the tree's
 	 */
@@ -98,10 +113,11 @@ final class TreemapPanel extends JComponent {
 			Function<DefaultMutableTreeNode, List<MemberFinding>> findings, Consumer<List<MemberFinding>> onFindings,
 			Function<DefaultMutableTreeNode, List<MemberDiagnostic>> diagnostics, Predicate<DefaultMutableTreeNode> notAnalysed,
 			Consumer<DefaultMutableTreeNode> onDiagnostic, Predicate<DefaultMutableTreeNode> testFile,
-			Function<DefaultMutableTreeNode, ChangeFlashes.Flash> flash, Predicate<DefaultMutableTreeNode> related,
-			BooleanSupplier loading, Supplier<String> emptyText) {
+			Function<DefaultMutableTreeNode, ChangeFlashes.Flash> flash, Function<DefaultMutableTreeNode, Relation> related,
+			Supplier<Predicate<DefaultMutableTreeNode>> focus, BooleanSupplier loading, Supplier<String> emptyText) {
 		this.tree = tree;
 		this.related = related;
+		this.focus = focus;
 		this.testFile = testFile;
 		this.flash = flash;
 		this.label = label;
@@ -203,8 +219,17 @@ final class TreemapPanel extends JComponent {
 				DefaultMutableTreeNode node = nodeAt(e.getPoint());
 				if (node != null) {
 					TreePath path = new TreePath(node.getPath());
+					// Ctrl+click (Cmd on macOS) adds the node to the selection or removes it, as in the tree
+					if (isToggle(e)) {
+						if (tree.isPathSelected(path)) {
+							tree.removeSelectionPath(path);
+						}
+						else {
+							tree.addSelectionPath(path);
+						}
+					}
 					// a right click on a selected node keeps the selection, as in the tree
-					if (!SwingUtilities.isRightMouseButton(e) || !tree.isPathSelected(path)) {
+					else if (!SwingUtilities.isRightMouseButton(e) || !tree.isPathSelected(path)) {
 						tree.setSelectionPath(path);
 					}
 				}
@@ -214,6 +239,10 @@ final class TreemapPanel extends JComponent {
 			public void mouseClicked(MouseEvent e) {
 				boolean wasZoomed = zoomed;
 				zoomed = false;
+				// a toggle only selects: no zoom, no jump to source, no findings popup
+				if (isToggle(e)) {
+					return;
+				}
 				if (SwingUtilities.isLeftMouseButton(e) && e.getClickCount() == 1) {
 					// the icon sits in the header, so it comes before zooming
 					DefaultMutableTreeNode withIcon = hitAt(iconHits, e.getPoint());
@@ -249,6 +278,10 @@ final class TreemapPanel extends JComponent {
 				else if (SwingUtilities.isMiddleMouseButton(e)) {
 					onDiff.run();
 				}
+			}
+
+			private static boolean isToggle(MouseEvent e) {
+				return SwingUtilities.isLeftMouseButton(e) && UIUtil.isControlKeyDown(e);
 			}
 
 			@Override
@@ -370,6 +403,7 @@ final class TreemapPanel extends JComponent {
 			diagnosticHits.clear();
 			crumbHits.clear();
 			weights.clear();
+			inFocus = focus.get();
 			DefaultMutableTreeNode root = (DefaultMutableTreeNode) tree.getModel().getRoot();
 			Rectangle2D bounds = new Rectangle2D.Double(0, 0, getWidth(), getHeight());
 			if (root != null && !zoom.isEmpty()) {
@@ -498,13 +532,20 @@ final class TreemapPanel extends JComponent {
 		int pad = JBUI.scale(3);
 		int header = metrics.getHeight() + pad;
 		boolean nested = !node.isLeaf() && r.width > 4 * pad && r.height > header + 3 * pad;
+		// focus on the selection and its related members: the other boxes fade. A container showing its children stays,
+		// so its border and header keep the structure readable; its children fade or not on their own
+		Composite composite = g.getComposite();
+		if (!nested && !inFocus.test(node)) {
+			g.setComposite(AlphaComposite.SrcOver.derive(0.5f));
+		}
 		g.setColor(ColorUtil.withAlpha(color, node.isLeaf() ? 0.35 : 0.12));
 		g.fillRect(r.x, r.y, r.width, r.height);
 		// over the status tint, as the tree's row background: blended, the blue of a modified box turns the amber gray. The
 		// border and label keep the status color. Only the header of a container showing its children, like the flash
 		// below, so a class is not taken for related through one of its members
-		if (!tree.isPathSelected(new TreePath(node.getPath())) && related.test(node)) {
-			g.setColor(DiffTreeRenderer.RELATED);
+		Relation relation = related.apply(node);
+		if (relation != null && !tree.isPathSelected(new TreePath(node.getPath()))) {
+			g.setColor(relation.background);
 			g.fill(nested ? new Rectangle(r.x, r.y, r.width, header) : r);
 		}
 		g.setColor(ColorUtil.withAlpha(color, 0.6));
@@ -535,19 +576,21 @@ final class TreemapPanel extends JComponent {
 		if (severity != null) {
 			iconWidth += paintCornerIcon(g, severity, r, header, pad, iconWidth, node, iconHits);
 		}
+		// the test icon before the label, as the tree's file icon, when it fits beside the corner icons; in the label's
+		// color, as its own red and green would read as test results. Its outline only: colorizing the platform's icon
+		// fills its light disc too and loses the glyph, or keeps it grey. Shrunk to clear the header's border
 		boolean test = testFile.test(node);
-		// the test mark before the label, as on the tree's icon, when it fits beside the corner icons; it is an overlay
-		// whose glyph fills only a corner of the icon, so the glyph, not the icon, is placed and spaced like a character
-		Icon mark = AllIcons.Nodes.JunitTestMark;
-		if (test && !testMarkGlyphKnown) {
-			testMarkGlyph = opaqueBounds(mark);
-			testMarkGlyphKnown = true;
+		int markSize = JBUI.scale(14);
+		if (markSize != testIconSize) {
+			testIcons.clear();
+			testIconSize = markSize;
 		}
-		Rectangle glyph = testMarkGlyph;
+		Icon mark = test ? testIcons.computeIfAbsent(color.getRGB(), rgb -> IconUtil.colorize(
+				IconUtil.scale(TEST_OUTLINE, this, markSize / (float) TEST_OUTLINE.getIconHeight()), color)) : null;
 		int markWidth = 0;
-		if (test && glyph != null && r.width >= iconWidth + glyph.width + 3 * pad && r.height >= header) {
-			mark.paintIcon(this, g, r.x + pad - glyph.x, r.y + (header - glyph.height) / 2 - glyph.y);
-			markWidth = glyph.width + pad;
+		if (test && r.width >= iconWidth + mark.getIconWidth() + 3 * pad && r.height >= header) {
+			mark.paintIcon(this, g, r.x + pad, r.y + (header - mark.getIconHeight()) / 2);
+			markWidth = mark.getIconWidth() + pad;
 		}
 		int labelWidth = r.width - 2 * pad - iconWidth - markWidth;
 		String text = r.height >= metrics.getHeight() ? TreemapLayout.ellipsize(label.apply(node), metrics, labelWidth) : "";
@@ -573,36 +616,14 @@ final class TreemapPanel extends JComponent {
 			g.drawRect(r.x + 1, r.y + 1, r.width - 2, r.height - 2);
 			g.setStroke(new BasicStroke());
 		}
+		g.setComposite(composite);
 	}
 
 	@Override
 	public void updateUI() {
 		super.updateUI();
-		// the icon may change with the theme or the scale
-		testMarkGlyphKnown = false;
-	}
-
-	/** The bounds of the painted pixels of {@code icon}, relative to its origin; null when it paints nothing. */
-	private Rectangle opaqueBounds(Icon icon) {
-		// a plain image in user space, which is what the bounds are in
-		BufferedImage image = ImageUtil.createImage(icon.getIconWidth(), icon.getIconHeight(), BufferedImage.TYPE_INT_ARGB);
-		Graphics2D g = image.createGraphics();
-		try {
-			icon.paintIcon(this, g, 0, 0);
-		}
-		finally {
-			g.dispose();
-		}
-		Rectangle bounds = null;
-		for (int y = 0; y < image.getHeight(); y++) {
-			for (int x = 0; x < image.getWidth(); x++) {
-				if ((image.getRGB(x, y) >>> 24) != 0) {
-					Rectangle pixel = new Rectangle(x, y, 1, 1);
-					bounds = bounds == null ? pixel : bounds.union(pixel);
-				}
-			}
-		}
-		return bounds;
+		// the status colors change with the theme
+		testIcons.clear();
 	}
 
 	/** {@link TreemapLayout#weight} from this paint's cache, so each subtree is summed once. */

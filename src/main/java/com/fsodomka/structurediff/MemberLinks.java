@@ -61,7 +61,8 @@ final class MemberLinks {
 	record Links(List<Link> callers, boolean callersCapped, List<Link> callees, boolean calleesCapped) {
 	}
 
-	private record Ref(VirtualFile file, int offset) {
+	/** A reference, or for a callee the referenced member at its name, with its whole {@code declaration}; null for a caller. */
+	private record Ref(VirtualFile file, int offset, TextRange declaration) {
 	}
 
 	/** The callers and callees of {@code element}, a member or class in a project file. Call inside a read action. */
@@ -90,7 +91,7 @@ final class MemberLinks {
 				capped[0] = true;
 				return false;
 			}
-			callers.add(new Ref(file, offset));
+			callers.add(new Ref(file, offset, null));
 			return true;
 		});
 
@@ -113,18 +114,21 @@ final class MemberLinks {
 						|| file.equals(homeFile) && (range.contains(target.getTextRange()) || PsiTreeUtil.isAncestor(target, element, false))) {
 					continue;
 				}
-				callees.add(new Ref(file, target.getTextOffset()));
+				callees.add(new Ref(file, target.getTextOffset(), target.getTextRange()));
 			}
 			return true;
 		});
 		return new Links(group(project, callers, homeFile, true), capped[0], group(project, callees, homeFile, false), calleesCapped[0]);
 	}
 
-	/** The first valid target of {@code reference}; null when it resolves to nothing. */
+	/**
+	 * The first valid target of {@code reference} other than its own element; null when it resolves to nothing. Kotlin's
+	 * destructuring entry {@code a} in {@code val (a, b) = v} resolves to itself first, then to {@code component1}.
+	 */
 	private static PsiElement resolve(PsiReference reference) {
 		if (reference instanceof PsiPolyVariantReference poly) {
 			for (ResolveResult result : poly.multiResolve(false)) {
-				if (result.isValidResult() && result.getElement() != null) {
+				if (result.isValidResult() && result.getElement() != null && result.getElement() != reference.getElement()) {
 					return result.getElement();
 				}
 			}
@@ -153,7 +157,8 @@ final class MemberLinks {
 			List<Ref> fileRefs = entry.getValue().stream().sorted(Comparator.comparingInt(Ref::offset)).toList();
 			PsiFile psi = file.isValid() ? PsiManager.getInstance(project).findFile(file) : null;
 			List<MemberPath> paths = psi == null ? Collections.nCopies(fileRefs.size(), MemberPath.NONE)
-					: MemberLocator.memberPaths(psi, fileRefs.stream().mapToInt(Ref::offset).toArray());
+					: MemberLocator.memberPaths(psi, fileRefs.stream().mapToInt(Ref::offset).toArray(),
+							fileRefs.stream().map(Ref::declaration).toArray(TextRange[]::new));
 			Document document = psi == null ? null : PsiDocumentManager.getInstance(project).getDocument(psi);
 			Module module = ModuleUtilCore.findModuleForFile(file, project);
 			String moduleName = module == null ? "" : module.getName();

@@ -162,7 +162,7 @@ public final class MemberLocator {
 		if (text.length() > StructureDiffComputer.MAX_STRUCTURE_LENGTH) {
 			return none;
 		}
-		return withStructure(project, fileName, fileType, text, none, (root, psi) -> enclosing(root, psi, offsets, false).stream().map(MemberPath::keys).toList());
+		return withStructure(project, fileName, fileType, text, none, (root, psi) -> enclosing(root, psi, offsets, null, false).stream().map(MemberPath::keys).toList());
 	}
 
 	/**
@@ -176,37 +176,73 @@ public final class MemberLocator {
 	/**
 	 * For each offset in the project file {@code psi}, the members enclosing it; like {@link #memberKeyPaths}, but with
 	 * the shown labels too and on the project's PSI, which resolves references. Call inside a read action.
+	 *
+	 * @param declarations for each offset, the range of the declaration it names, or null for a plain offset; its
+	 *                     members are found by the whole declaration, see {@link #enclosing}
 	 */
-	public static List<MemberPath> memberPaths(PsiFile psi, int[] offsets) {
+	public static List<MemberPath> memberPaths(PsiFile psi, int[] offsets, @Nullable TextRange @Nullable [] declarations) {
 		List<MemberPath> none = Collections.nCopies(offsets.length, MemberPath.NONE);
 		if (psi.getTextLength() > StructureDiffComputer.MAX_STRUCTURE_LENGTH) {
 			return none;
 		}
-		return withStructure(psi, none, (root, file) -> enclosing(root, file, offsets, true));
+		return withStructure(psi, none, (root, file) -> enclosing(root, file, offsets, declarations, true));
 	}
 
-	/** The members enclosing each offset, outermost first; with their icons when {@code withIcons}, else null icons. */
-	private static List<MemberPath> enclosing(TreeElement root, PsiFile psi, int[] offsets, boolean withIcons) {
+	/**
+	 * The members enclosing each offset, outermost first; with their icons when {@code withIcons}, else null icons. For
+	 * an offset with a declaration, the first member inside the declaration counts too, when none contains the offset,
+	 * while the path has not reached the declaration: the structure view may show a part of it that does not hold the
+	 * name, like TypeScript's arrow function of a {@code const}, which starts after the name. Of overlapping siblings
+	 * containing the offset the smallest is taken, the first of equal ones: Kotlin's primary constructor contains its
+	 * {@code val} parameters, which are properties of their own.
+	 */
+	private static List<MemberPath> enclosing(TreeElement root, PsiFile psi, int[] offsets,
+											  @Nullable TextRange @Nullable [] declarations, boolean withIcons) {
 		List<MemberPath> result = new ArrayList<>(offsets.length);
-		for (int offset : offsets) {
+		for (int i = 0; i < offsets.length; i++) {
+			int offset = offsets[i];
+			TextRange declaration = declarations == null ? null : declarations[i];
 			List<String> keys = new ArrayList<>();
 			List<String> labels = new ArrayList<>();
 			List<Icon> icons = new ArrayList<>();
 			TreeElement current = root;
+			// the range of the last member on the path, null at the root
+			TextRange reached = null;
 			while (current != null) {
-				TreeElement enclosing = null;
+				Map.Entry<String, TreeElement> enclosing = null;
+				TextRange enclosingRange = null;
+				// the first member inside the declaration, taken when none contains the offset
+				Map.Entry<String, TreeElement> inDeclaration = null;
+				TextRange inDeclarationRange = null;
+				boolean beforeDeclaration = declaration != null && (reached == null || !declaration.contains(reached));
 				for (Map.Entry<String, TreeElement> entry : keyedChildren(current, psi).entrySet()) {
 					PsiElement element = element(entry.getValue());
-					if (element != null && element.getTextRange().getStartOffset() <= offset
-							&& offset < element.getTextRange().getEndOffset()) {
-						keys.add(entry.getKey());
-						labels.add(label(entry.getValue()));
-						icons.add(withIcons ? entry.getValue().getPresentation().getIcon(false) : null);
-						enclosing = entry.getValue();
-						break;
+					TextRange range = element == null ? null : element.getTextRange();
+					if (range == null) {
+						continue;
+					}
+					if (range.getStartOffset() <= offset && offset < range.getEndOffset()) {
+						if (enclosingRange == null || range.getLength() < enclosingRange.getLength()) {
+							enclosing = entry;
+							enclosingRange = range;
+						}
+					}
+					else if (inDeclaration == null && beforeDeclaration && declaration.contains(range)) {
+						inDeclaration = entry;
+						inDeclarationRange = range;
 					}
 				}
-				current = enclosing;
+				if (enclosing == null) {
+					enclosing = inDeclaration;
+					enclosingRange = inDeclarationRange;
+				}
+				if (enclosing != null) {
+					keys.add(enclosing.getKey());
+					labels.add(label(enclosing.getValue()));
+					icons.add(withIcons ? enclosing.getValue().getPresentation().getIcon(false) : null);
+					reached = enclosingRange;
+				}
+				current = enclosing == null ? null : enclosing.getValue();
 			}
 			result.add(new MemberPath(keys, labels, Collections.unmodifiableList(icons)));
 		}

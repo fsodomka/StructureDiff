@@ -53,6 +53,10 @@ dependencies {
         // merge base and diff with the working tree, for "Branch vs main"
         bundledPlugin('Git4Idea')
         testBundledPlugin('com.intellij.java')
+        // TypeScript, whose structure view gives a const's arrow function, not the const, as the member
+        testBundledPlugin('JavaScript')
+        // Kotlin, whose structure view gives a lambda property as the property
+        testBundledPlugin('org.jetbrains.kotlin')
         testFramework(TestFrameworkType.Platform.INSTANCE)
     }
     testImplementation 'junit:junit:4.13.2'

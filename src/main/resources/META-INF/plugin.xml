@@ -26,11 +26,12 @@
         <b>Flash Changes</b> (briefly highlight what appeared, changed or disappeared; in the treemap, new boxes grow in
         and removals are not shown).</li>
       <li>Per file and member: <b>+</b> added, <b>~</b> modified, <b>&minus;</b> removed counts, changed lines,
-        renames/moves, and old vs new signature in the tooltip. Multiple VCS roots are grouped.</li>
+        renames/moves, and old vs new signature in the tooltip; test files have the test icon. Multiple VCS roots
+        are grouped.</li>
       <li><b>Double-click</b>/<b>Enter</b> jumps to source, <b>middle-click</b> opens the diff at the member;
         context menu: Show Diff, Jump to Source, Show Member History, Copy Path.</li>
       <li><b>Show as Treemap</b> shows the changes as nested boxes sized by changed lines and colored by status
-        (removed members red). Click a box's header to zoom in, the breadcrumb or <b>Backspace</b> to zoom out; arrows
+        (removed members red); test files have the test icon. Click a box's header to zoom in, the breadcrumb or <b>Backspace</b> to zoom out; arrows
         move between sibling boxes, <b>Enter</b> zooms in or jumps to source. Double-click, middle-click, the context
         menu and finding icons work as in the tree.</li>
     </ul>
@@ -41,7 +42,8 @@
         selected member uses and what uses it: <b>Used by</b> and <b>Uses</b>, each split into internal (the member's
         own file) and external (other files, by module), with members nested under their class and test code marked.</li>
       <li>The changed members related to the selected one are highlighted in the tree and the treemap, so you
-        see which parts of a change belong together.</li>
+        see which parts of a change belong together: amber (↑) for members that use it, teal (↓) for members it
+        uses, lavender (↕) for both. In the treemap the other members fade to half strength.</li>
       <li>Imports, generated sources and build, configuration and text files are left out. The usages are searched again
         after you edit the files; large searches are capped.</li>
       <li>Double-click or Enter in the panel jumps to the usage; click the header to jump to the member itself. Not

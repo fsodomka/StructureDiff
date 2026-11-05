@@ -128,7 +128,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		treemap = new TreemapPanel(tree, DiffLabels::speedSearchText,
 				node -> DiffTreeNodes.keyPart(node.getUserObject()), selection::jumpToSource, selection::openSelected,
 				signals::findingsOf, signals::showFindings, signals::diagnosticsOf, signals::notAnalysed, signals::openDiagnostic,
-				this::isTestFile, flashes::get, usages::isRelated, () -> this.loading, () -> tree.getEmptyText().getText());
+				this::isTestFile, flashes::get, usages::relationOf, usages::focus, () -> this.loading, () -> tree.getEmptyText().getText());
 		renderer = new DiffTreeRenderer(project, signals, flashes, usages);
 
 		installTree();
