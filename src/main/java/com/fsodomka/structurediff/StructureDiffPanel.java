@@ -100,6 +100,9 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	/** Set while {@link #show} replaces the tree, whose selection events are not the user's. */
 	private boolean rebuilding;
 	private final TreemapPanel treemap;
+	/** The treemap fill chooser, shown only with the treemap; null until the constructor creates it. */
+	private @Nullable ActionToolbar fillToolbar;
+	private final CoverageState coverage;
 	private final DiffTreeRenderer renderer;
 	/** A refresh is in progress, from the start until the first one finishes; shown by the treemap, the tree paints busy. */
 	private boolean loading = true;
@@ -125,10 +128,13 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		usagesPanel = new UsagesPanel(project, selection::jumpToSource);
 		Disposer.register(this, usagesPanel);
 		usages = new UsagesController(project, usagesPanel, tree, this::repaintViews, this);
+		coverage = new CoverageState(project, () -> shownFiles(files),
+				() -> options.get(Option.TREEMAP) && options.fill() == ViewOptions.Fill.COVERAGE, this::repaintViews, this);
 		treemap = new TreemapPanel(tree, DiffLabels::speedSearchText,
 				node -> DiffTreeNodes.keyPart(node.getUserObject()), selection::jumpToSource, selection::openSelected,
 				signals::findingsOf, signals::showFindings, signals::diagnosticsOf, signals::notAnalysed, signals::openDiagnostic,
-				this::isTestFile, flashes::get, usages::relationOf, usages::focus, () -> this.loading, () -> tree.getEmptyText().getText());
+				this::isTestFile, flashes::get, usages::relationOf, usages::focus, () -> this.loading, () -> tree.getEmptyText().getText(), options::fill,
+				node -> coverage.countsOf(node), () -> coverage.legend(), () -> coverage.overlay());
 		renderer = new DiffTreeRenderer(project, signals, flashes, usages);
 
 		installTree();
@@ -233,12 +239,15 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				return ActionUpdateThread.EDT;
 			}
 		});
-		group.add(options.toggle(Option.NESTED, "Show Nested Changes",
+		// the filters, set once and left, in one dropdown; the buttons that switch what the panel shows stay on the toolbar
+		DefaultActionGroup view = DefaultActionGroup.createPopupGroup(() -> "View Options");
+		view.getTemplatePresentation().setIcon(AllIcons.Actions.Show);
+		view.add(options.toggle(Option.NESTED, "Show Nested Changes",
 				"Show changes inside functions, components and object literals, not only inside classes", AllIcons.Actions.ShowAsTree,
 				() -> show(files, false)));
-		group.add(options.toggle(Option.UNVERSIONED, "Show Unversioned Files", null, AllIcons.Vcs.ShowUnversionedFiles,
+		view.add(options.toggle(Option.UNVERSIONED, "Show Unversioned Files", null, AllIcons.Vcs.ShowUnversionedFiles,
 				source::hasUnversioned, "Commits have no unversioned files", () -> show(files, false)));
-		group.add(options.toggle(Option.FLASH, "Flash Changes",
+		view.add(options.toggle(Option.FLASH, "Flash Changes",
 				"Briefly highlight members and files that appeared, changed or disappeared", AllIcons.Actions.Highlighting,
 				source::hasUnversioned, "Commits have no member changes", () -> {
 					if (!options.get(Option.FLASH)) {
@@ -247,6 +256,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 						show(files, false);
 					}
 				}));
+		group.add(view);
 		group.add(options.toggle(Option.TREEMAP, "Show as Treemap",
 				"Show the changes as nested rectangles sized by their changed lines", AllIcons.Actions.GroupByModule,
 				this::updateContent));
@@ -275,6 +285,24 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		summaryRow.setOpaque(false);
 		summaryRow.add(summary, BorderLayout.WEST);
 		summaryRow.add(findingCounts, BorderLayout.CENTER);
+		// the treemap's colors at the end of the summary row, which describes what the treemap shows
+		ActionToolbar fillToolbar = this.fillToolbar = ActionManager.getInstance().createActionToolbar("StructureDiff.TreemapFill",
+				new DefaultActionGroup(options.fillChooser(() -> options.get(Option.TREEMAP),
+						fill -> fill != ViewOptions.Fill.COVERAGE || coverage.available())), true);
+		// the fill is shared, so a choice in another panel, even another project's, recolors a treemap shown meanwhile;
+		// a hidden panel updates its coverage when shown
+		ViewOptions.onFillChange(() -> {
+			if (showing) {
+				coverage.update();
+			}
+			treemap.repaint();
+			fillToolbar.updateActionsAsync();
+		}, this);
+		fillToolbar.setTargetComponent(this);
+		fillToolbar.setReservePlaceAutoPopupIcon(false);
+		fillToolbar.getComponent().setOpaque(false);
+		fillToolbar.getComponent().setBorder(JBUI.Borders.emptyRight(4));
+		summaryRow.add(fillToolbar.getComponent(), BorderLayout.EAST);
 		JPanel top = new JPanel(new BorderLayout());
 		top.add(toolbar.getComponent(), BorderLayout.NORTH);
 		top.add(summaryRow, BorderLayout.SOUTH);
@@ -328,6 +356,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				showing = isShowing();
 				if (showing) {
 					loadSettings();
+					// the treemap's fill is shared by the panels, and another one may have changed it meanwhile
+					coverage.update();
 				}
 				if (showing && stale) {
 					stale = false;
@@ -444,6 +474,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 						// the tree may show other members now, and edits may have moved the findings into other ones
 						signals.updateFindings();
 						signals.updateDiagnostics();
+						coverage.update();
 					}
 				})
 				.submit(AppExecutorUtil.getAppExecutorService())
@@ -651,7 +682,13 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 
 	/** Shows the tree or the treemap, with the {@link #usagesPanel} below while {@link #usagesShown}. */
 	private void updateContent() {
+		// the Coverage fill computes only while the treemap shows
+		coverage.update();
 		JComponent main = options.get(Option.TREEMAP) ? treemap : treeScroll;
+		// its chooser shows only with the treemap, and a toolbar updates on its own only on later UI activity
+		if (fillToolbar != null) {
+			fillToolbar.updateActionsAsync();
+		}
 		if (!usagesShown()) {
 			usagesSplitter.setFirstComponent(null);
 			setContent(main);

@@ -52,6 +52,8 @@ dependencies {
         }
         // merge base and diff with the working tree, for "Branch vs main"
         bundledPlugin('Git4Idea')
+        // the selected Run with Coverage, for the treemap's Coverage fill; optional at runtime
+        bundledPlugin('Coverage')
         testBundledPlugin('com.intellij.java')
         // TypeScript, whose structure view gives a const's arrow function, not the const, as the member
         testBundledPlugin('JavaScript')
@@ -104,6 +106,9 @@ tasks.named('check') {
 
 tasks.withType(RunIdeTask).configureEach {
     maxHeapSize = '4g'
+    // the sandbox's jar is written just before start, so the IDE takes it for a change, tries to reload the plugin,
+    // which cannot be unloaded, and asks for a restart that closes it
+    autoReload = false
 }
 
 if (platformLocalPath.isPresent()) {

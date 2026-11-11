@@ -38,6 +38,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -295,6 +296,17 @@ public final class ReviewFindingsService implements PersistentStateComponent<Rev
 
 	boolean isDismissed(Finding finding) {
 		return state.dismissedFindings.contains(finding.fingerprint());
+	}
+
+	/**
+	 * How many findings of the shown reviews {@link #dismiss} or {@link #restore} of {@code findings} affects: also the
+	 * others with their fingerprint, such as two findings of one category on the same line.
+	 */
+	int affectedCount(Collection<Finding> findings) {
+		Set<String> fingerprints = new HashSet<>();
+		findings.forEach(finding -> fingerprints.add(finding.fingerprint()));
+		return (int) reviews.values().stream().flatMap(review -> review.findings().stream())
+				.filter(finding -> fingerprints.contains(finding.fingerprint())).count();
 	}
 
 	/** The dismissed findings of the shown reviews; they are not highlighted. */

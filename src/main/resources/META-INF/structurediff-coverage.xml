@@ -1,0 +1,7 @@
+<!-- Loaded with the bundled Coverage plugin: the treemap's Coverage fill reads its selected run. -->
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <projectService serviceInterface="com.fsodomka.structurediff.CoverageLines"
+                        serviceImplementation="com.fsodomka.structurediff.coverage.IdeCoverageLines"/>
+    </extensions>
+</idea-plugin>

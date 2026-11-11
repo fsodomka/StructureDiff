@@ -21,7 +21,7 @@
         one is exported alone; otherwise each gets a <code>&lt;timestamp&gt;-&lt;repo&gt;-changes.diff</code> and the
         command lists them all. The directory and the command are set in
         <b>Settings | Tools | Structure Diff</b>.</li>
-      <li>Toggles: <b>Show Nested Changes</b> (inside functions and object literals), <b>Show Unversioned Files</b> (except files directly in the
+      <li>Toggles, in the toolbar's <b>View Options</b> dropdown: <b>Show Nested Changes</b> (inside functions and object literals), <b>Show Unversioned Files</b> (except files directly in the
         repository root),
         <b>Flash Changes</b> (briefly highlight what appeared, changed or disappeared; in the treemap, new boxes grow in
         and removals are not shown).</li>
@@ -34,6 +34,12 @@
         (removed members red); test files have the test icon. Click a box's header to zoom in, the breadcrumb or <b>Backspace</b> to zoom out; arrows
         move between sibling boxes, <b>Enter</b> zooms in or jumps to source. Double-click, middle-click, the context
         menu and finding icons work as in the tree.</li>
+      <li><b>Treemap colors</b>, chosen in the summary row while the treemap shows, with a legend below it:
+        <b>Status</b>;
+        <b>File Type</b> (one hue per type, the most changed first); <b>Coverage</b> (with the bundled Coverage plugin:
+        the share of each member's lines the selected <i>Run with Coverage</i> executed, orange for none to blue for
+        all, hatched when the file was edited since; reopen a closed run in <b>Run | Manage Coverage Reports</b>). The
+        border and label keep the status color.</li>
     </ul>
 
     <h3>Show Usages</h3>
@@ -74,6 +80,7 @@
     <depends>com.intellij.modules.vcs</depends>
     <!-- only the Branch vs main mode (BranchChangeSource) needs Git; without it the mode is not offered -->
     <depends optional="true" config-file="structurediff-git.xml">Git4Idea</depends>
+    <depends optional="true" config-file="structurediff-coverage.xml">Coverage</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow id="Structure Diff" anchor="left" secondary="true" icon="AllIcons.Actions.Diff"

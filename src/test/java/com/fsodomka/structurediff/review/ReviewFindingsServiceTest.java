@@ -77,6 +77,11 @@ public class ReviewFindingsServiceTest extends BasePlatformTestCase {
 		assertEquals(List.of("First on the class.", "Second on the class.", "On the field."), highlighted());
 
 		Finding first = service.placements().iterator().next().finding();
+		Finding field = service.placements().stream().map(Placement::finding).filter(finding -> finding.line() == 2).findFirst().orElseThrow();
+		assertEquals(2, service.affectedCount(List.of(first)));
+		assertEquals(3, service.affectedCount(List.of(first, field)));
+		assertEquals("Dismiss 2 Findings", ReviewActions.dismiss(getProject(), first).getTemplateText());
+		assertEquals("Dismiss Finding", ReviewActions.dismiss(getProject(), field).getTemplateText());
 		service.dismiss(first);
 		assertEquals(List.of("On the field."), highlighted());
 		assertEquals(List.of("First on the class.", "Second on the class."), dismissed());

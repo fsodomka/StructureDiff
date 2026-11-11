@@ -109,7 +109,8 @@ final class MemberLinks {
 				PsiElement target = resolve(reference);
 				PsiFile targetPsi = target == null ? null : target.getContainingFile();
 				VirtualFile file = targetPsi == null ? null : targetPsi.getVirtualFile();
-				if (file == null || !index.isInContent(file) || GeneratedSourcesFilter.isGeneratedSourceByAnyFilter(file, project)
+				// a light element, e.g. a record's implicit accessor, has a file but no text
+				if (file == null || target.getTextRange() == null || !index.isInContent(file) || GeneratedSourcesFilter.isGeneratedSourceByAnyFilter(file, project)
 						// its own code, and the members enclosing it
 						|| file.equals(homeFile) && (range.contains(target.getTextRange()) || PsiTreeUtil.isAncestor(target, element, false))) {
 					continue;

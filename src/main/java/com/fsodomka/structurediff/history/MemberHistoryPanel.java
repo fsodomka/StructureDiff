@@ -27,7 +27,6 @@ import com.intellij.openapi.progress.util.ProgressIndicatorBase;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectCloseListener;
-import com.intellij.openapi.ui.ThreeComponentsSplitter;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.AbstractVcs;
 import com.intellij.openapi.vcs.FilePath;
@@ -39,6 +38,7 @@ import com.intellij.openapi.vcs.history.VcsHistoryProvider;
 import com.intellij.openapi.vcs.history.VcsHistorySession;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.DoubleClickListener;
+import com.intellij.ui.OnePixelSplitter;
 import com.intellij.ui.PopupHandler;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.components.JBLabel;
@@ -80,8 +80,12 @@ final class MemberHistoryPanel extends JPanel implements Disposable {
 			column("Message", -1, row -> StringUtil.notNullize(row.newer().getCommitMessage()).lines().findFirst().orElse("")),
 			column("Change", 75, row -> row.kind().text),
 			column("Detail", -1, HistoryRow::detail));
-	/** Initial height of the commit list; resizing the tool window changes only the diff below it. */
-	private static final int LIST_HEIGHT = 180;
+	/** Share of the height the commit list gets by default; the diff below it gets the rest. */
+	private static final float LIST_PROPORTION = 0.3f;
+	/** Remembers where the divider was dragged to, for all tabs and across restarts. */
+	private static final String LIST_PROPORTION_KEY = "MemberHistory.list.proportion";
+	/** Commits the list shows at least, when there are that many, however short the tool window or far up the divider is dragged. */
+	private static final int MIN_LIST_ROWS = 5;
 	private final TableView<HistoryRow> table = new TableView<>(model);
 	private final JBLabel status = new JBLabel();
 	private final JButton loadMore = new JButton("Load more");
@@ -152,17 +156,29 @@ final class MemberHistoryPanel extends JPanel implements Disposable {
 		});
 		PopupHandler.installPopupMenu(table, popup, ActionPlaces.getPopupPlace("MemberHistoryPopup"));
 
-		JPanel list = new JPanel(new BorderLayout());
-		list.add(ScrollPaneFactory.createScrollPane(table), BorderLayout.CENTER);
+		JScrollPane scroll = ScrollPaneFactory.createScrollPane(table);
+		JPanel list = new JPanel(new BorderLayout()) {
+			@Override
+			public Dimension getMinimumSize() {
+				Insets insets = scroll.getInsets();
+				int rows = Math.min(table.getRowCount(), MIN_LIST_ROWS);
+				int height = table.getTableHeader().getPreferredSize().height + rows * table.getRowHeight()
+						+ insets.top + insets.bottom + (status.isVisible() ? status.getPreferredSize().height : 0);
+				return new Dimension(super.getMinimumSize().width, height);
+			}
+		};
+		list.add(scroll, BorderLayout.CENTER);
+		// the scroll pane is a validate root, so rows added while searching would not lay out the splitter again
+		model.addTableModelListener(e -> list.revalidate());
 		status.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
 		list.add(status, BorderLayout.SOUTH);
 		// the message gets most of the width left by the fixed columns
 		table.getColumnModel().getColumn(3).setPreferredWidth(JBUI.scale(500));
 		table.getColumnModel().getColumn(5).setPreferredWidth(JBUI.scale(200));
-		ThreeComponentsSplitter splitter = new ThreeComponentsSplitter(true, true);
+		OnePixelSplitter splitter = new OnePixelSplitter(true, LIST_PROPORTION_KEY, LIST_PROPORTION);
+		splitter.setHonorComponentsMinimumSize(true);
 		splitter.setFirstComponent(list);
-		splitter.setInnerComponent(diff.getComponent());
-		splitter.setFirstSize(JBUI.scale(LIST_HEIGHT));
+		splitter.setSecondComponent(diff.getComponent());
 		add(header, BorderLayout.NORTH);
 		add(splitter, BorderLayout.CENTER);
 		load();
@@ -219,7 +235,7 @@ final class MemberHistoryPanel extends JPanel implements Disposable {
 				List<String> start = fromIndex == 0 && localChange != null
 						? MemberHistory.committedKeyPath(project, localChange, from) : from;
 				Batch batch = MemberHistory.walk(project, all, path, start, fromIndex, BATCH, progress,
-						row -> onEdt(() -> model.addRow(row)), contents);
+						row -> onEdt(() -> addRow(row)), contents);
 				onEdt(() -> {
 					revisions = all;
 					keyPath = batch.keyPath();
@@ -238,6 +254,14 @@ final class MemberHistoryPanel extends JPanel implements Disposable {
 				onEdt(() -> status.setText("Cannot load history: " + e.getMessage()));
 			}
 		}, progress));
+	}
+
+	/** Adds a found row; selects the first one, the latest commit, so its diff shows without a click. */
+	private void addRow(HistoryRow row) {
+		model.addRow(row);
+		if (model.getRowCount() == 1 && table.getSelectedRow() < 0) {
+			table.getSelectionModel().setSelectionInterval(0, 0);
+		}
 	}
 
 	/** The file's revisions, newest first; empty when it has no VCS history. */

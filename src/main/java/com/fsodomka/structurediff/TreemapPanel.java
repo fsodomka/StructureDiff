@@ -14,6 +14,8 @@ import com.intellij.util.ui.GraphicsUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 
+import org.jetbrains.annotations.Nullable;
+
 import javax.swing.*;
 import javax.swing.event.TreeModelEvent;
 import javax.swing.event.TreeModelListener;
@@ -25,10 +27,12 @@ import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
 import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.*;
@@ -40,6 +44,19 @@ import java.util.function.*;
  */
 final class TreemapPanel extends JComponent {
 	private static final Color REMOVED = new JBColor(new Color(0xC7_22_2A), new Color(0xE0_5A_5A));
+	/** The Coverage fill's ends: orange and blue, unlike the status red and green, and told apart without hue vision. */
+	private static final Color UNCOVERED = new JBColor(new Color(0xE0_6C_00), new Color(0xF0_8C_30));
+	private static final Color COVERED = new JBColor(new Color(0x1F_6F_D6), new Color(0x4C_95_F0));
+	/** The {@link ViewOptions.Fill#FILE_TYPE} hues, most changed type first; clear of the status green and red. */
+	private static final List<Color> TYPE_HUES = List.of(
+			new JBColor(new Color(0x3A_6E_C9), new Color(0x6A_9B_E8)),
+			new JBColor(new Color(0xE0_7B_10), new Color(0xF0_A0_4B)),
+			new JBColor(new Color(0x8A_4F_D1), new Color(0xB0_8A_EE)),
+			new JBColor(new Color(0x0F_95_A3), new Color(0x4C_C4_D1)),
+			new JBColor(new Color(0xD1_4F_A8), new Color(0xE8_8A_CC)),
+			new JBColor(new Color(0xA8_9A_10), new Color(0xD4_C6_4A)),
+			new JBColor(new Color(0x8C_5A_3C), new Color(0xC0_8E_6E)),
+			new JBColor(new Color(0x4F_6B_7A), new Color(0x8F_AB_BA)));
 	/**
 	 * The test icon's outline and glyph on a transparent disc, colorized per label color; white, as colorizing scales
 	 * the color's brightness by the pixel's.
@@ -61,6 +78,17 @@ final class TreemapPanel extends JComponent {
 	private Predicate<DefaultMutableTreeNode> inFocus = node -> true;
 	private final BooleanSupplier loading;
 	private final Supplier<String> emptyText;
+	private final Supplier<ViewOptions.Fill> fill;
+	private final Function<DefaultMutableTreeNode, CoverageState.Counts> coverage;
+	private final Supplier<String> coverageLegend;
+	/** A message over the treemap, which takes no input meanwhile when it says so; null when none. */
+	private final Supplier<Overlay> overlay;
+
+	/** A message centered over the treemap, with a spinner when {@code busy}; dims it and takes its input when {@code blocksInput}. */
+	record Overlay(String text, boolean busy, boolean blocksInput) {
+	}
+	/** The hues of this paint's file types, the most changed first; the ones past {@link #TYPE_HUES} are gray. */
+	private final Map<String, Color> typeColors = new LinkedHashMap<>();
 	/** Painted rectangles, parents before their children; the last one containing a point is the deepest node there. */
 	private final List<Hit> hits = new ArrayList<>();
 	/** Where a click zooms in: container headers, and whole containers too small to show their children. */
@@ -114,7 +142,9 @@ final class TreemapPanel extends JComponent {
 			Function<DefaultMutableTreeNode, List<MemberDiagnostic>> diagnostics, Predicate<DefaultMutableTreeNode> notAnalysed,
 			Consumer<DefaultMutableTreeNode> onDiagnostic, Predicate<DefaultMutableTreeNode> testFile,
 			Function<DefaultMutableTreeNode, ChangeFlashes.Flash> flash, Function<DefaultMutableTreeNode, Relation> related,
-			Supplier<Predicate<DefaultMutableTreeNode>> focus, BooleanSupplier loading, Supplier<String> emptyText) {
+			Supplier<Predicate<DefaultMutableTreeNode>> focus, BooleanSupplier loading, Supplier<String> emptyText,
+			Supplier<ViewOptions.Fill> fill, Function<DefaultMutableTreeNode, CoverageState.Counts> coverage,
+			Supplier<String> coverageLegend, Supplier<Overlay> overlay) {
 		this.tree = tree;
 		this.related = related;
 		this.focus = focus;
@@ -127,6 +157,10 @@ final class TreemapPanel extends JComponent {
 		this.notAnalysed = notAnalysed;
 		this.loading = loading;
 		this.emptyText = emptyText;
+		this.fill = fill;
+		this.coverage = coverage;
+		this.coverageLegend = coverageLegend;
+		this.overlay = overlay;
 		setOpaque(true);
 		setToolTipText("");
 		setFocusable(true);
@@ -314,6 +348,9 @@ final class TreemapPanel extends JComponent {
 
 	@Override
 	public String getToolTipText(MouseEvent event) {
+		if (blocked()) {
+			return null;
+		}
 		DefaultMutableTreeNode node = nodeAt(event.getPoint());
 		if (node == null) {
 			return null;
@@ -326,8 +363,33 @@ final class TreemapPanel extends JComponent {
 			String removed = lines[1] > 0 ? "−" + lines[1] : "";
 			text += added.isEmpty() && removed.isEmpty() ? "" : "  " + (added.isEmpty() || removed.isEmpty() ? added + removed : added + " " + removed);
 		}
+		String fillValue = fillValue(node);
+		if (fillValue != null) {
+			text += "  ·  " + fillValue;
+		}
 		return MemberSignals.withSignals(text,
 				findings.apply(node), diagnostics.apply(node), notAnalysed.test(node));
+	}
+
+	/** What the fill colors {@code node} by, for its tooltip; null for the Status fill, which the label already shows. */
+	private @Nullable String fillValue(DefaultMutableTreeNode node) {
+		switch (fill.get()) {
+			case FILE_TYPE -> {
+				FileDiff file = DiffTreeNodes.fileOf(node);
+				return file == null ? null : TreemapLayout.fileTypeName(file);
+			}
+			case COVERAGE -> {
+				CoverageState.Counts counts = coverage.apply(node);
+				if (counts == null) {
+					return "no coverage data";
+				}
+				return counts.percent() + " % covered (" +counts.covered() + " / " + counts.coverable() + " lines)"
+						+ (counts.stale() ? ", edited since the run" : "");
+			}
+			default -> {
+				return null;
+			}
+		}
 	}
 
 	private DefaultMutableTreeNode nodeAt(Point point) {
@@ -428,7 +490,20 @@ final class TreemapPanel extends JComponent {
 				g2.drawString(empty, x + iconWidth, getHeight() / 2);
 				return;
 			}
+			typeColors.clear();
+			if (fill.get() == ViewOptions.Fill.FILE_TYPE) {
+				List<String> names = TreemapLayout.fileTypesBySize(root);
+				for (int i = 0; i < names.size(); i++) {
+					typeColors.put(names.get(i), i < TYPE_HUES.size() ? TYPE_HUES.get(i) : UIUtil.getLabelForeground());
+				}
+			}
+			int legendHeight = paintLegend(g2);
+			bounds = new Rectangle2D.Double(bounds.getX(), bounds.getY(), bounds.getWidth(), bounds.getHeight() - legendHeight);
 			paintChildren(g2, root, bounds);
+			Overlay message = overlay.get();
+			if (message != null) {
+				paintOverlay(g2, message, spinner);
+			}
 			// a refresh in progress, in the corner as in the tree
 			if (loading) {
 				int pad = JBUI.scale(3);
@@ -525,9 +600,7 @@ final class TreemapPanel extends JComponent {
 		hits.add(new Hit(rect, node));
 		Rectangle r = rect.getBounds();
 		FileStatus status = status(node.getUserObject());
-		// red rather than the tree's gray, which a box can't strike out and which reads as unchanged
-		Color color = status == FileStatus.DELETED ? REMOVED
-				: status == null || status.getColor() == null ? UIUtil.getLabelForeground() : status.getColor();
+		Color color = statusColor(status);
 		FontMetrics metrics = g.getFontMetrics();
 		int pad = JBUI.scale(3);
 		int header = metrics.getHeight() + pad;
@@ -538,11 +611,28 @@ final class TreemapPanel extends JComponent {
 		if (!nested && !inFocus.test(node)) {
 			g.setComposite(AlphaComposite.SrcOver.derive(0.5f));
 		}
-		g.setColor(ColorUtil.withAlpha(color, node.isLeaf() ? 0.35 : 0.12));
+		// the status still shows in the border and label
+		Color fillColor = color;
+		if (fill.get() == ViewOptions.Fill.FILE_TYPE) {
+			fillColor = typeColor(node);
+		}
+		CoverageState.Counts counts = fill.get() == ViewOptions.Fill.COVERAGE ? coverage.apply(node) : null;
+		if (fill.get() == ViewOptions.Fill.COVERAGE) {
+			// the plain background without data (not a JVM file, no executable lines, or not in the run), so no share is taken
+			// for it; opaque, as unfilled it would show its container's tint
+			fillColor = counts == null ? null : coverageColor(2 * counts.share() - 1);
+		}
+		// opaque, the tint premixed with the background: a translucent fill would add up with its container's, so the same
+		// value would look different inside a tinted container than inside a plain one
+		g.setColor(fillColor == null ? UIUtil.getTreeBackground()
+				: node.isLeaf() ? leafTint(fillColor) : ColorUtil.mix(UIUtil.getTreeBackground(), fillColor, 0.12));
 		g.fillRect(r.x, r.y, r.width, r.height);
 		// over the status tint, as the tree's row background: blended, the blue of a modified box turns the amber gray. The
 		// border and label keep the status color. Only the header of a container showing its children, like the flash
 		// below, so a class is not taken for related through one of its members
+		if (counts != null && counts.stale() && (node.isLeaf() || !nested)) {
+			paintHatch(g, r);
+		}
 		Relation relation = related.apply(node);
 		if (relation != null && !tree.isPathSelected(new TreePath(node.getPath()))) {
 			g.setColor(relation.background);
@@ -626,9 +716,219 @@ final class TreemapPanel extends JComponent {
 		testIcons.clear();
 	}
 
+	/**
+	 * Mixed from the background toward the covered blue for +1 and the uncovered orange for −1; at least a quarter of the
+	 * hue, so a half-covered box stays tinted rather than looking like an unfilled one without data.
+	 */
+	private static Color coverageColor(double score) {
+		Color end = score >= 0 ? COVERED : UNCOVERED;
+		return ColorUtil.mix(UIUtil.getTreeBackground(), end, 0.25 + 0.75 * Math.abs(score));
+	}
+
+	/** The hue of the type of {@code node}'s file; gray above the files, e.g. for a repository. */
+	private Color typeColor(DefaultMutableTreeNode node) {
+		FileDiff file = DiffTreeNodes.fileOf(node);
+		return file == null ? UIUtil.getLabelForeground()
+				: typeColors.getOrDefault(TreemapLayout.fileTypeName(file), UIUtil.getLabelForeground());
+	}
+
+	/** The legend of the fill along the bottom; returns the height it takes. */
+	private int paintLegend(Graphics2D g) {
+		FontMetrics metrics = g.getFontMetrics();
+		int pad = JBUI.scale(3);
+		int height = metrics.getHeight() + 2 * pad;
+		int y = getHeight() - height;
+		g.setColor(UIUtil.getTreeBackground());
+		g.fillRect(0, y, getWidth(), height);
+		if (fill.get() == ViewOptions.Fill.STATUS) {
+			paintStatusLegend(g, y, pad);
+		}
+		else if (fill.get() == ViewOptions.Fill.FILE_TYPE) {
+			paintTypeLegend(g, y, pad);
+		}
+		else if (fill.get() == ViewOptions.Fill.COVERAGE) {
+			paintScaleLegend(g, y, pad, "0 %", "100 %", coverageLegend.get(), TreemapPanel::coverageColor);
+		}
+		return height;
+	}
+
+	/** A swatch and name per status, in the colors of the boxes' fill, border and label. */
+	private void paintStatusLegend(Graphics2D g, int y, int pad) {
+		List<Map.Entry<String, Color>> entries = new ArrayList<>();
+		entries.add(Map.entry("Added", statusColor(FileStatus.ADDED)));
+		entries.add(Map.entry("Modified", statusColor(FileStatus.MODIFIED)));
+		entries.add(Map.entry("Deleted", statusColor(FileStatus.DELETED)));
+		paintSwatchLegend(g, y, pad, entries);
+	}
+
+	/** A swatch and name per file type, the most changed first, then "other" for the gray ones. */
+	private void paintTypeLegend(Graphics2D g, int y, int pad) {
+		List<String> names = new ArrayList<>(typeColors.keySet());
+		int colored = Math.min(names.size(), TYPE_HUES.size());
+		List<Map.Entry<String, Color>> entries = new ArrayList<>();
+		for (int i = 0; i < colored; i++) {
+			entries.add(Map.entry(names.get(i), TYPE_HUES.get(i)));
+		}
+		if (names.size() > colored) {
+			entries.add(Map.entry("other (" + (names.size() - colored) + ")", UIUtil.getLabelForeground()));
+		}
+		paintSwatchLegend(g, y, pad, entries);
+	}
+
+	/** A swatch and name per entry, then "+N" for those not fitting. */
+	private void paintSwatchLegend(Graphics2D g, int y, int pad, List<Map.Entry<String, Color>> entries) {
+		FontMetrics metrics = g.getFontMetrics();
+		int swatch = JBUI.scale(8);
+		int baseline = y + pad + metrics.getAscent();
+		int swatchY = y + pad + (metrics.getHeight() - swatch) / 2;
+		int x = pad;
+		for (int i = 0; i < entries.size(); i++) {
+			String text = entries.get(i).getKey();
+			int width = swatch + pad + metrics.stringWidth(text) + 3 * pad;
+			String more = "+" + (entries.size() - i);
+			if (x + width > getWidth() - metrics.stringWidth(more) - pad && i < entries.size() - 1 || x + width > getWidth()) {
+				g.setColor(UIUtil.getInactiveTextColor());
+				g.drawString(more, x, baseline);
+				return;
+			}
+			g.setColor(leafTint(entries.get(i).getValue()));
+			g.fillRect(x, swatchY, swatch, swatch);
+			g.setColor(UIUtil.getInactiveTextColor());
+			g.drawString(text, x + swatch + pad, baseline);
+			x += width;
+		}
+	}
+
+	/**
+	 * Dims the treemap and centers the message over it, in a box of the background color; its lines are wrapped at
+	 * words to the treemap's width.
+	 */
+	private void paintOverlay(Graphics2D g, Overlay message, Icon spinner) {
+		if (message.blocksInput()) {
+			g.setColor(ColorUtil.withAlpha(UIUtil.getTreeBackground(), 0.6));
+			g.fillRect(0, 0, getWidth(), getHeight());
+		}
+		g.setFont(UIUtil.getLabelFont());
+		FontMetrics metrics = g.getFontMetrics();
+		int pad = JBUI.scale(10);
+		int iconWidth = message.busy() ? spinner.getIconWidth() + JBUI.scale(6) : 0;
+		int maxText = Math.max(JBUI.scale(40), getWidth() - 2 * pad - iconWidth - JBUI.scale(8));
+		List<String> lines = new ArrayList<>();
+		for (String paragraph : message.text().split("\n")) {
+			lines.addAll(TreemapLayout.wrap(paragraph, metrics, maxText));
+		}
+		int textWidth = lines.stream().mapToInt(metrics::stringWidth).max().orElse(0);
+		int width = Math.min(getWidth(), iconWidth + textWidth + 2 * pad);
+		int height = Math.max(lines.size() * metrics.getHeight(), spinner.getIconHeight()) + 2 * pad;
+		int x = (getWidth() - width) / 2;
+		int y = (getHeight() - height) / 2;
+		g.setColor(UIUtil.getTreeBackground());
+		g.fillRoundRect(x, y, width, height, pad, pad);
+		g.setColor(UIUtil.getBoundsColor());
+		g.drawRoundRect(x, y, width - 1, height - 1, pad, pad);
+		if (message.busy()) {
+			spinner.paintIcon(this, g, x + pad, y + (height - spinner.getIconHeight()) / 2);
+		}
+		g.setColor(UIUtil.getLabelForeground());
+		int lineY = y + pad + metrics.getAscent();
+		for (String line : lines) {
+			g.drawString(line, x + pad + iconWidth + (textWidth - metrics.stringWidth(line)) / 2, lineY);
+			lineY += metrics.getHeight();
+		}
+	}
+
+	/** No clicks, wheel or drags while an {@link Overlay} takes the input. */
+	@Override
+	protected void processMouseEvent(MouseEvent e) {
+		if (!blocked()) {
+			super.processMouseEvent(e);
+		}
+	}
+
+	@Override
+	protected void processMouseMotionEvent(MouseEvent e) {
+		if (!blocked()) {
+			super.processMouseMotionEvent(e);
+		}
+	}
+
+	@Override
+	protected void processMouseWheelEvent(MouseWheelEvent e) {
+		if (!blocked()) {
+			super.processMouseWheelEvent(e);
+		}
+	}
+
+	/** No key bindings or key listeners while an {@link Overlay} takes the input. */
+	@Override
+	protected boolean processKeyBinding(KeyStroke ks, KeyEvent e, int condition, boolean pressed) {
+		return !blocked() && super.processKeyBinding(ks, e, condition, pressed);
+	}
+
+	@Override
+	protected void processKeyEvent(KeyEvent e) {
+		if (!blocked()) {
+			super.processKeyEvent(e);
+		}
+	}
+
+	/** A leaf box's fill of {@code color}, which the legend shows too. */
+	private static Color leafTint(Color color) {
+		return ColorUtil.mix(UIUtil.getTreeBackground(), color, 0.35);
+	}
+
+	/** Whether an {@link Overlay} that takes the input shows. */
+	private boolean blocked() {
+		Overlay message = overlay.get();
+		return message != null && message.blocksInput();
+	}
+
+	/** Diagonal lines over a box whose file changed after the coverage run, as its numbers may be off. */
+	private static void paintHatch(Graphics2D g, Rectangle r) {
+		Shape clip = g.getClip();
+		g.clipRect(r.x, r.y, r.width, r.height);
+		g.setColor(ColorUtil.withAlpha(UIUtil.getLabelForeground(), 0.25));
+		int step = JBUI.scale(6);
+		for (int x = r.x - r.height; x < r.x + r.width; x += step) {
+			g.drawLine(x, r.y + r.height, x + r.height, r.y);
+		}
+		g.setClip(clip);
+	}
+
+	/** {@code left}, a bar of {@code scale} from -1 to +1, {@code right}, then {@code note} when not null. */
+	private void paintScaleLegend(Graphics2D g, int y, int pad, String left, String right, @Nullable String note,
+								  DoubleFunction<Color> scale) {
+		FontMetrics metrics = g.getFontMetrics();
+		int barWidth = JBUI.scale(120);
+		int total = metrics.stringWidth(left) + barWidth + metrics.stringWidth(right) + 4 * pad
+				+ (note == null ? 0 : metrics.stringWidth(note) + 3 * pad);
+		int x = Math.max(pad, (getWidth() - total) / 2);
+		int baseline = y + pad + metrics.getAscent();
+		g.setColor(UIUtil.getInactiveTextColor());
+		g.drawString(left, x, baseline);
+		x += metrics.stringWidth(left) + 2 * pad;
+		int barY = y + pad + (metrics.getHeight() - JBUI.scale(8)) / 2;
+		for (int i = 0; i < barWidth; i++) {
+			g.setColor(leafTint(scale.apply(2.0 * i / (barWidth - 1) - 1)));
+			g.fillRect(x + i, barY, 1, JBUI.scale(8));
+		}
+		x += barWidth + 2 * pad;
+		g.setColor(UIUtil.getInactiveTextColor());
+		g.drawString(right, x, baseline);
+		if (note != null) {
+			g.drawString(note, x + metrics.stringWidth(right) + 3 * pad, baseline);
+		}
+	}
+
 	/** {@link TreemapLayout#weight} from this paint's cache, so each subtree is summed once. */
 	private double cachedWeight(DefaultMutableTreeNode node) {
 		return TreemapLayout.weight(node, weights);
+	}
+
+	/** The status's color; red rather than the tree's gray for deleted, which a box can't strike out and which reads as unchanged. */
+	private static Color statusColor(@Nullable FileStatus status) {
+		return status == FileStatus.DELETED ? REMOVED
+				: status == null || status.getColor() == null ? UIUtil.getLabelForeground() : status.getColor();
 	}
 
 	private static FileStatus status(Object item) {

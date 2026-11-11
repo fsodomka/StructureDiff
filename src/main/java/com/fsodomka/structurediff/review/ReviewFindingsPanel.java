@@ -57,6 +57,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -101,13 +102,13 @@ final class ReviewFindingsPanel extends SimpleToolWindowPanel implements Disposa
 		setContent(splitter);
 
 		ReviewFindingsService service = ReviewFindingsService.getInstance(project);
-		DumbAwareAction dismiss = treeAction("Dismiss Finding", AllIcons.Actions.Cancel,
+		DumbAwareAction dismiss = treeAction(placements -> affectedText("Dismiss", placements), AllIcons.Actions.Cancel,
 				placement -> !service.isDismissed(placement.finding()),
 				placements -> placements.forEach(placement -> service.dismiss(placement.finding())));
-		DumbAwareAction restore = treeAction("Restore Finding", AllIcons.Actions.Rollback,
+		DumbAwareAction restore = treeAction(placements -> affectedText("Restore", placements), AllIcons.Actions.Rollback,
 				placement -> service.isDismissed(placement.finding()),
 				placements -> placements.forEach(placement -> service.restore(placement.finding())));
-		DumbAwareAction copy = treeAction("Copy Finding", AllIcons.Actions.Copy, placement -> true,
+		DumbAwareAction copy = treeAction(placements -> "Copy Finding", AllIcons.Actions.Copy, placement -> true,
 				placements -> CopyPasteManager.getInstance().setContents(new StringSelection(placements.stream()
 						.map(placement -> ReviewText.plain(placement.finding())).collect(Collectors.joining("\n\n")))));
 		PopupHandler.installPopupMenu(tree, new DefaultActionGroup(dismiss, restore, copy), "ReviewFindingsPopup");
@@ -381,9 +382,19 @@ final class ReviewFindingsPanel extends SimpleToolWindowPanel implements Disposa
 				.toList();
 	}
 
-	/** An action on the selected findings that {@code enabled} accepts. */
-	private DumbAwareAction treeAction(String text, Icon icon, Predicate<Placement> enabled, Consumer<List<Placement>> perform) {
-		return new DumbAwareAction(text, null, icon) {
+	/**
+	 * "Dismiss Finding", or "Dismiss 2 Findings" when the action also affects the findings that share a fingerprint
+	 * with the selected ones.
+	 */
+	private String affectedText(String verb, List<Placement> placements) {
+		int count = ReviewFindingsService.getInstance(project).affectedCount(placements.stream().map(Placement::finding).toList());
+		return ReviewActions.findingsText(verb, count);
+	}
+
+	/** An action on the selected findings that {@code enabled} accepts; {@code text} names it for those findings. */
+	private DumbAwareAction treeAction(Function<List<Placement>, String> text, Icon icon, Predicate<Placement> enabled,
+									   Consumer<List<Placement>> perform) {
+		return new DumbAwareAction(text.apply(List.of()), null, icon) {
 			@Override
 			public void actionPerformed(@NotNull AnActionEvent e) {
 				List<Placement> placements = selectedPlacements().stream().filter(enabled).toList();
@@ -394,7 +405,9 @@ final class ReviewFindingsPanel extends SimpleToolWindowPanel implements Disposa
 
 			@Override
 			public void update(@NotNull AnActionEvent e) {
-				e.getPresentation().setEnabled(selectedPlacements().stream().anyMatch(enabled));
+				List<Placement> placements = selectedPlacements().stream().filter(enabled).toList();
+				e.getPresentation().setEnabled(!placements.isEmpty());
+				e.getPresentation().setText(text.apply(placements));
 			}
 
 			@Override

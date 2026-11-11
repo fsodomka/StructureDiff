@@ -5,14 +5,12 @@ import com.intellij.openapi.vcs.FileStatus;
 import org.junit.Test;
 
 import javax.swing.tree.DefaultMutableTreeNode;
-import java.awt.FontMetrics;
+import java.awt.*;
 import java.awt.geom.Rectangle2D;
 import java.util.List;
 import java.util.function.Function;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 public class TreemapLayoutTest {
 	@Test
@@ -51,6 +49,7 @@ public class TreemapLayoutTest {
 	private static MemberDiff member(String key, boolean container) {
 		return new MemberDiff(key, key, "pom.xml", "pom.xml", null, FileStatus.MODIFIED, 0, 0, 1, 1, container, 0, List.of());
 	}
+
 
 	@Test
 	public void ellipsizeCutsToTheWidth() {

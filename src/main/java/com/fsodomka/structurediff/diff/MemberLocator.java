@@ -199,6 +199,8 @@ public final class MemberLocator {
 	private static List<MemberPath> enclosing(TreeElement root, PsiFile psi, int[] offsets,
 											  @Nullable TextRange @Nullable [] declarations, boolean withIcons) {
 		List<MemberPath> result = new ArrayList<>(offsets.length);
+		// a structure view builds its children anew on each call, and coverage asks for every executable line of a file
+		Map<TreeElement, Map<String, TreeElement>> children = new IdentityHashMap<>();
 		for (int i = 0; i < offsets.length; i++) {
 			int offset = offsets[i];
 			TextRange declaration = declarations == null ? null : declarations[i];
@@ -215,7 +217,7 @@ public final class MemberLocator {
 				Map.Entry<String, TreeElement> inDeclaration = null;
 				TextRange inDeclarationRange = null;
 				boolean beforeDeclaration = declaration != null && (reached == null || !declaration.contains(reached));
-				for (Map.Entry<String, TreeElement> entry : keyedChildren(current, psi).entrySet()) {
+				for (Map.Entry<String, TreeElement> entry : children.computeIfAbsent(current, parent -> keyedChildren(parent, psi)).entrySet()) {
 					PsiElement element = element(entry.getValue());
 					TextRange range = element == null ? null : element.getTextRange();
 					if (range == null) {

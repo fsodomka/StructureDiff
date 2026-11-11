@@ -96,6 +96,32 @@ public class ViewOptionsTest extends BasePlatformTestCase {
 		assertFalse(panel.getContent() instanceof TreemapPanel);
 	}
 
+	public void testAFillChoiceReachesEveryPanelUntilItIsDisposed() {
+		Disposable first = Disposer.newDisposable(getTestRootDisposable(), "first");
+		AtomicInteger firstChanges = new AtomicInteger();
+		AtomicInteger secondChanges = new AtomicInteger();
+		ViewOptions.onFillChange(firstChanges::incrementAndGet, first);
+		ViewOptions.onFillChange(secondChanges::incrementAndGet, getTestRootDisposable());
+		ViewOptions chooser = new ViewOptions();
+		try {
+			chooser.setFill(ViewOptions.Fill.FILE_TYPE);
+			assertEquals(1, firstChanges.get());
+			assertEquals("the other panel, which did not choose", 1, secondChanges.get());
+			assertEquals(ViewOptions.Fill.FILE_TYPE, new ViewOptions().fill());
+
+			chooser.setFill(ViewOptions.Fill.FILE_TYPE);
+			assertEquals("no change, no notice", 1, secondChanges.get());
+
+			Disposer.dispose(first);
+			chooser.setFill(ViewOptions.Fill.STATUS);
+			assertEquals("disposed", 1, firstChanges.get());
+			assertEquals(2, secondChanges.get());
+		}
+		finally {
+			chooser.setFill(ViewOptions.Fill.STATUS);
+		}
+	}
+
 	private static final class NoChanges implements ChangeSource {
 		@Override
 		public Collection<Change> changes() {

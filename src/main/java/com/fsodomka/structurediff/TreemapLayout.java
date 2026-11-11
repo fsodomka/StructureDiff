@@ -126,6 +126,50 @@ final class TreemapLayout {
 		return Math.max(children, Math.max(1, Math.sqrt(lines[0] + lines[1])));
 	}
 
+	/**
+	 * The file types under {@code root} by changed lines, most first, then by name; members are not visited, as their
+	 * file counts their lines.
+	 */
+	static List<String> fileTypesBySize(DefaultMutableTreeNode root) {
+		Map<String, Integer> sizes = new HashMap<>();
+		addFileTypeSizes(root, sizes);
+		return sizes.entrySet().stream()
+				.sorted(Map.Entry.<String, Integer>comparingByValue().reversed().thenComparing(Map.Entry.comparingByKey()))
+				.map(Map.Entry::getKey).toList();
+	}
+
+	private static void addFileTypeSizes(DefaultMutableTreeNode node, Map<String, Integer> sizes) {
+		if (node.getUserObject() instanceof FileDiff file) {
+			sizes.merge(fileTypeName(file), file.linesAdded() + file.linesRemoved(), Integer::sum);
+			return;
+		}
+		for (int i = 0; i < node.getChildCount(); i++) {
+			addFileTypeSizes((DefaultMutableTreeNode) node.getChildAt(i), sizes);
+		}
+	}
+
+	static String fileTypeName(FileDiff file) {
+		return file.fileType().getDisplayName();
+	}
+
+	/** {@code text} broken at spaces into lines no wider than {@code width}; a word wider than that gets a line of its own. */
+	static List<String> wrap(String text, FontMetrics metrics, int width) {
+		List<String> lines = new ArrayList<>();
+		StringBuilder line = new StringBuilder();
+		for (String word : text.split(" ")) {
+			String candidate = line.isEmpty() ? word : line + " " + word;
+			if (!line.isEmpty() && metrics.stringWidth(candidate) > width) {
+				lines.add(line.toString());
+				line = new StringBuilder(word);
+			}
+			else {
+				line = new StringBuilder(candidate);
+			}
+		}
+		lines.add(line.toString());
+		return lines;
+	}
+
 	/** {@code rect} scaled by {@code scale} around its center. */
 	static Rectangle2D scaled(Rectangle2D rect, double scale) {
 		double width = rect.getWidth() * scale;

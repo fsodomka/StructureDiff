@@ -15,7 +15,7 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
   all. A new `reviews/` gets a `.gitignore`. The directory, the
   command (default `/adversarial-review`) and whether to copy it are set in **Settings | Tools | Structure
   Diff**.
-- Toggles: **Show Nested Changes** (inside functions and object literals), **Show Unversioned Files** (except files
+- Toggles, in the toolbar's **View Options** dropdown: **Show Nested Changes** (inside functions and object literals), **Show Unversioned Files** (except files
   directly in the repository root),
   **Flash Changes** (briefly highlight what appeared, changed or disappeared; in the treemap, new boxes grow in and
   removals are not shown).
@@ -27,6 +27,11 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
   red); test files have the test icon. Click a box's header to zoom in, the breadcrumb or **Backspace** to zoom out; arrows move between sibling
   boxes, **Enter** zooms in or jumps to source. Double-click, middle-click, the context menu and finding icons work as
   in the tree.
+- **Treemap colors**, chosen in the summary row while the treemap shows, with a legend below it: **Status**;
+  **File Type** (one hue per type, the
+  most changed first); **Coverage** (with the bundled Coverage plugin: the share of each member's lines the selected
+  *Run with Coverage* executed, orange for none to blue for all, hatched when the file was edited since; reopen a
+  closed run in **Run | Manage Coverage Reports**). The border and label keep the status color.
 
 ## Show Usages
 

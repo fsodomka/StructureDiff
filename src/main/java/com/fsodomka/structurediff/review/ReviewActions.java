@@ -12,15 +12,23 @@ import com.intellij.openapi.wm.ToolWindowManager;
 import org.jetbrains.annotations.NotNull;
 
 import java.awt.datatransfer.StringSelection;
+import java.util.List;
 
 /** Actions on one finding, shared by the gutter icon and the tool window. */
 final class ReviewActions {
 	private ReviewActions() {
 	}
 
+	/** Also dismisses the findings that share the fingerprint of {@code finding}; its text then counts them. */
 	static AnAction dismiss(Project project, Finding finding) {
-		return action("Dismiss Finding", AllIcons.Actions.Cancel,
-				() -> ReviewFindingsService.getInstance(project).dismiss(finding));
+		ReviewFindingsService service = ReviewFindingsService.getInstance(project);
+		return action(findingsText("Dismiss", service.affectedCount(List.of(finding))), AllIcons.Actions.Cancel,
+				() -> service.dismiss(finding));
+	}
+
+	/** "Dismiss Finding" for one finding or none, "Dismiss 2 Findings" for more. */
+	static String findingsText(String verb, int count) {
+		return count > 1 ? verb + ' ' + count + " Findings" : verb + " Finding";
 	}
 
 	static AnAction copy(Finding finding) {
