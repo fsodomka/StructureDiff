@@ -22,7 +22,7 @@ public final class FindingMembers {
 	/**
 	 * One finding. {@code keyPath} are the keys of the members enclosing it, outermost first, as Structure Diff keys
 	 * them; empty when it is in no member or its file has no structure. {@code title} starts with the severity.
-	 * {@code finding} selects it in the Review Findings tool window.
+	 * {@code finding} selects it in the Review tool window.
 	 */
 	public record MemberFinding(List<String> keyPath, String title, ReviewSeverity severity, int rank, Finding finding) {
 		/** The icon of the severity, as in the editor gutter. */

@@ -22,7 +22,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -47,9 +46,9 @@ final class DiagnosticMembers {
 		}
 	}
 
-	/** Diagnostics by absolute path, most severe first; {@code analysed} the paths of the files with an open editor. */
-	record Diagnostics(Map<String, List<MemberDiagnostic>> byPath, Set<String> analysed) {
-		static final Diagnostics NONE = new Diagnostics(Map.of(), Set.of());
+	/** Diagnostics by absolute path, most severe first. */
+	record Diagnostics(Map<String, List<MemberDiagnostic>> byPath) {
+		static final Diagnostics NONE = new Diagnostics(Map.of());
 	}
 
 	/** Key paths found in one document text, compared by identity, for the given offsets. */
@@ -86,9 +85,7 @@ final class DiagnosticMembers {
 	private static Diagnostics compute(Project project, List<Target> targets, Set<DiagnosticLevel> shown,
 									   Map<String, CachedKeyPaths> cache) {
 		Map<String, List<MemberDiagnostic>> byPath = new HashMap<>();
-		Set<String> analysed = new HashSet<>();
 		for (Target target : targets) {
-			analysed.add(target.path());
 			if (target.document().getImmutableCharSequence() != target.text()) {
 				// edited since prepare, so the highlights may not match the text; the daemon's next pass computes again
 				continue;
@@ -116,7 +113,7 @@ final class DiagnosticMembers {
 			byPath.put(target.path(), List.copyOf(found));
 		}
 		cache.keySet().retainAll(byPath.keySet());
-		return new Diagnostics(Map.copyOf(byPath), Set.copyOf(analysed));
+		return new Diagnostics(Map.copyOf(byPath));
 	}
 
 	/** Key paths for {@code offsets} in the target's text; empty ones when parsing fails. */

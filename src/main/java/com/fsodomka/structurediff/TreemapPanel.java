@@ -3,6 +3,7 @@ package com.fsodomka.structurediff;
 import com.fsodomka.structurediff.DiagnosticMembers.MemberDiagnostic;
 import com.fsodomka.structurediff.diff.FileDiff;
 import com.fsodomka.structurediff.diff.MemberDiff;
+import com.fsodomka.structurediff.reason.EditReasonMembers.MemberReason;
 import com.fsodomka.structurediff.review.FindingMembers.MemberFinding;
 import com.intellij.openapi.util.IconLoader;
 import com.intellij.openapi.vcs.FileStatus;
@@ -43,7 +44,6 @@ import java.util.function.*;
  * container's header zooms into it; a breadcrumb leads back.
  */
 final class TreemapPanel extends JComponent {
-	private static final Color REMOVED = new JBColor(new Color(0xC7_22_2A), new Color(0xE0_5A_5A));
 	/** The Coverage fill's ends: orange and blue, unlike the status red and green, and told apart without hue vision. */
 	private static final Color UNCOVERED = new JBColor(new Color(0xE0_6C_00), new Color(0xF0_8C_30));
 	private static final Color COVERED = new JBColor(new Color(0x1F_6F_D6), new Color(0x4C_95_F0));
@@ -68,8 +68,9 @@ final class TreemapPanel extends JComponent {
 	/** Identifies a node among its siblings, stable across refreshes; labels are not unique, as overloads show. */
 	private final Function<DefaultMutableTreeNode, String> key;
 	private final Function<DefaultMutableTreeNode, List<MemberFinding>> findings;
+	private final Function<DefaultMutableTreeNode, List<MemberReason>> reasons;
+	private final Consumer<DefaultMutableTreeNode> onReason;
 	private final Function<DefaultMutableTreeNode, List<MemberDiagnostic>> diagnostics;
-	private final Predicate<DefaultMutableTreeNode> notAnalysed;
 	private final Predicate<DefaultMutableTreeNode> testFile;
 	private final Function<DefaultMutableTreeNode, ChangeFlashes.Flash> flash;
 	private final Function<DefaultMutableTreeNode, Relation> related;
@@ -97,6 +98,8 @@ final class TreemapPanel extends JComponent {
 	private final List<Hit> iconHits = new ArrayList<>();
 	/** The painted diagnostic icons; a click opens the node's most severe diagnostic. */
 	private final List<Hit> diagnosticHits = new ArrayList<>();
+	/** The pencils of the boxes' reason marks, whose click shows the first reason. */
+	private final List<Hit> reasonHits = new ArrayList<>();
 	/** The breadcrumb segments; a null node is the root. */
 	private final List<Hit> crumbHits = new ArrayList<>();
 	/** Weights of the nodes painted, computed once per paint. */
@@ -124,8 +127,8 @@ final class TreemapPanel extends JComponent {
 	 * @param onDiff   middle click, like the tree's
 	 * @param findings the review findings shown on a node, most severe first
 	 * @param onFindings click on a severity icon, like the tree's
+	 * @param reasons  the agent's edit reasons shown on a node, newest first
 	 * @param diagnostics the IDE's diagnostics shown on a node, most severe first
-	 * @param notAnalysed whether a node is a changed file the IDE has not analysed
 	 * @param onDiagnostic click on a diagnostic icon, like the tree's
 	 * @param testFile  whether a node is a file in test sources, marked with the tree's test icon in the label's color
 	 * @param flash     the node's running flash, or null; the caller repaints while flashes run
@@ -139,7 +142,8 @@ final class TreemapPanel extends JComponent {
 	TreemapPanel(JTree tree, Function<DefaultMutableTreeNode, String> label, Function<DefaultMutableTreeNode, String> key,
 			Runnable onOpen, Runnable onDiff,
 			Function<DefaultMutableTreeNode, List<MemberFinding>> findings, Consumer<List<MemberFinding>> onFindings,
-			Function<DefaultMutableTreeNode, List<MemberDiagnostic>> diagnostics, Predicate<DefaultMutableTreeNode> notAnalysed,
+			Function<DefaultMutableTreeNode, List<MemberReason>> reasons, Consumer<DefaultMutableTreeNode> onReason,
+			Function<DefaultMutableTreeNode, List<MemberDiagnostic>> diagnostics,
 			Consumer<DefaultMutableTreeNode> onDiagnostic, Predicate<DefaultMutableTreeNode> testFile,
 			Function<DefaultMutableTreeNode, ChangeFlashes.Flash> flash, Function<DefaultMutableTreeNode, Relation> related,
 			Supplier<Predicate<DefaultMutableTreeNode>> focus, BooleanSupplier loading, Supplier<String> emptyText,
@@ -153,8 +157,9 @@ final class TreemapPanel extends JComponent {
 		this.label = label;
 		this.key = key;
 		this.findings = findings;
+		this.reasons = reasons;
+		this.onReason = onReason;
 		this.diagnostics = diagnostics;
-		this.notAnalysed = notAnalysed;
 		this.loading = loading;
 		this.emptyText = emptyText;
 		this.fill = fill;
@@ -284,6 +289,11 @@ final class TreemapPanel extends JComponent {
 						onFindings.accept(findings.apply(withIcon));
 						return;
 					}
+					DefaultMutableTreeNode withReason = hitAt(reasonHits, e.getPoint());
+					if (withReason != null) {
+						onReason.accept(withReason);
+						return;
+					}
 					DefaultMutableTreeNode withDiagnostic = hitAt(diagnosticHits, e.getPoint());
 					if (withDiagnostic != null) {
 						onDiagnostic.accept(withDiagnostic);
@@ -321,7 +331,8 @@ final class TreemapPanel extends JComponent {
 			@Override
 			public void mouseMoved(MouseEvent e) {
 				// a hand over a severity icon, as in the tree
-				boolean onIcon = hitAt(iconHits, e.getPoint()) != null || hitAt(diagnosticHits, e.getPoint()) != null;
+				boolean onIcon = hitAt(iconHits, e.getPoint()) != null || hitAt(diagnosticHits, e.getPoint()) != null
+						|| hitAt(reasonHits, e.getPoint()) != null;
 				setCursor(onIcon ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : null);
 			}
 		};
@@ -368,7 +379,7 @@ final class TreemapPanel extends JComponent {
 			text += "  ·  " + fillValue;
 		}
 		return MemberSignals.withSignals(text,
-				findings.apply(node), diagnostics.apply(node), notAnalysed.test(node));
+				findings.apply(node), diagnostics.apply(node), reasons.apply(node));
 	}
 
 	/** What the fill colors {@code node} by, for its tooltip; null for the Status fill, which the label already shows. */
@@ -463,6 +474,7 @@ final class TreemapPanel extends JComponent {
 			zoomHits.clear();
 			iconHits.clear();
 			diagnosticHits.clear();
+			reasonHits.clear();
 			crumbHits.clear();
 			weights.clear();
 			inFocus = focus.get();
@@ -675,22 +687,40 @@ final class TreemapPanel extends JComponent {
 			testIcons.clear();
 			testIconSize = markSize;
 		}
-		Icon mark = test ? testIcons.computeIfAbsent(color.getRGB(), rgb -> IconUtil.colorize(
-				IconUtil.scale(TEST_OUTLINE, this, markSize / (float) TEST_OUTLINE.getIconHeight()), color)) : null;
+		Color labelColor = labelColor(color);
+		Icon mark = test ? testIcons.computeIfAbsent(labelColor.getRGB(), rgb -> StatusColors.inColor(
+				IconUtil.scale(TEST_OUTLINE, this, markSize / (float) TEST_OUTLINE.getIconHeight()), labelColor)) : null;
 		int markWidth = 0;
 		if (test && r.width >= iconWidth + mark.getIconWidth() + 3 * pad && r.height >= header) {
 			mark.paintIcon(this, g, r.x + pad, r.y + (header - mark.getIconHeight()) / 2);
 			markWidth = mark.getIconWidth() + pad;
 		}
 		int labelWidth = r.width - 2 * pad - iconWidth - markWidth;
-		String text = r.height >= metrics.getHeight() ? TreemapLayout.ellipsize(label.apply(node), metrics, labelWidth) : "";
+		// the edit-reason mark after the label, as in the tree, so boxes with reasons are found without hovering
+		List<MemberReason> nodeReasons = reasons.apply(node);
+		// in the label's color, as a fixed one vanishes on the box color close to it, but grey when no reason of the node
+		// is on changed code and purple when all are a skill's, as the tree marks it
+		Color reasonColor = nodeReasons.isEmpty() ? null : MemberReason.markColor(nodeReasons);
+		Icon pencil = nodeReasons.isEmpty() ? null
+				: StatusColors.pencilMark(reasonColor != null ? reasonColor : labelColor);
+		int pencilGap = metrics.charWidth(' ');
+		int pencilWidth = pencil == null ? 0 : pencilGap + pencil.getIconWidth();
+		String text = r.height >= metrics.getHeight() ? TreemapLayout.ellipsize(label.apply(node), metrics, labelWidth - pencilWidth) : "";
 		if (!text.isEmpty()) {
-			g.setColor(color);
+			g.setColor(labelColor);
 			// a container's label is its header; a leaf's is centered in the box
-			int x = markWidth + (!node.isLeaf() ? r.x + pad : r.x + pad + (labelWidth - metrics.stringWidth(text)) / 2);
+			int textWidth = metrics.stringWidth(text);
+			int x = markWidth + (!node.isLeaf() ? r.x + pad : r.x + pad + (labelWidth - textWidth - pencilWidth) / 2);
 			int y = !node.isLeaf() ? r.y + pad / 2 + metrics.getAscent()
 					: r.y + (r.height - metrics.getHeight()) / 2 + metrics.getAscent();
 			g.drawString(text, x, y);
+			if (pencil != null) {
+				// centered on the text line, whose top is the baseline less the ascent
+				int pencilX = x + textWidth + pencilGap;
+				int pencilY = y - metrics.getAscent() + (metrics.getHeight() - pencil.getIconHeight()) / 2;
+				pencil.paintIcon(this, g, pencilX, pencilY);
+				reasonHits.add(new Hit(new Rectangle2D.Double(pencilX, pencilY, pencil.getIconWidth(), pencil.getIconHeight()), node));
+			}
 		}
 		if (nested) {
 			paintChildren(g, node, new Rectangle2D.Double(r.x + pad, r.y + header, r.width - 2 * pad, r.height - header - pad));
@@ -872,6 +902,14 @@ final class TreemapPanel extends JComponent {
 		}
 	}
 
+	/**
+	 * The label's color on a box of {@code color}: the color itself on a light theme, lightened halfway to white on a
+	 * dark one, where the box is a dark blend of the same hue and the full color on it read at about 2.5:1 (red) to 3:1.
+	 */
+	private static Color labelColor(Color color) {
+		return JBColor.isBright() ? color : ColorUtil.mix(color, Color.WHITE, 0.5);
+	}
+
 	/** A leaf box's fill of {@code color}, which the legend shows too. */
 	private static Color leafTint(Color color) {
 		return ColorUtil.mix(UIUtil.getTreeBackground(), color, 0.35);
@@ -925,10 +963,10 @@ final class TreemapPanel extends JComponent {
 		return TreemapLayout.weight(node, weights);
 	}
 
-	/** The status's color; red rather than the tree's gray for deleted, which a box can't strike out and which reads as unchanged. */
+	/** The status's color; red rather than the platform's gray for deleted, which reads as unchanged. */
 	private static Color statusColor(@Nullable FileStatus status) {
-		return status == FileStatus.DELETED ? REMOVED
-				: status == null || status.getColor() == null ? UIUtil.getLabelForeground() : status.getColor();
+		Color color = StatusColors.of(status);
+		return color == null ? UIUtil.getLabelForeground() : color;
 	}
 
 	private static FileStatus status(Object item) {

@@ -15,7 +15,6 @@ import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
 
 public class DiagnosticMembersTest extends BasePlatformTestCase {
 	private static final String BROKEN = """
@@ -43,7 +42,6 @@ public class DiagnosticMembersTest extends BasePlatformTestCase {
 
 		Diagnostics result = compute(List.of(file(file.getPath(), FileStatus.MODIFIED)));
 
-		assertEquals(Set.of(file.getPath()), result.analysed());
 		List<MemberDiagnostic> found = result.byPath().get(file.getPath());
 		assertNotNull(found);
 		MemberDiagnostic first = found.getFirst();
@@ -64,7 +62,6 @@ public class DiagnosticMembersTest extends BasePlatformTestCase {
 				List.of(file(file.getPath(), FileStatus.MODIFIED)), EnumSet.of(DiagnosticLevel.WARNING), new HashMap<>()).get());
 
 		// analysed, but its error is not shown
-		assertEquals(Set.of(file.getPath()), result.analysed());
 		assertNull(result.byPath().get(file.getPath()));
 	}
 
@@ -76,7 +73,6 @@ public class DiagnosticMembersTest extends BasePlatformTestCase {
 		Diagnostics result = compute(List.of(file(closed.getPath(), FileStatus.MODIFIED), file(open.getPath(), FileStatus.DELETED)));
 
 		// the deleted one is open, yet has no after side to analyse
-		assertEquals(Set.of(), result.analysed());
 		assertTrue(result.byPath().isEmpty());
 	}
 }

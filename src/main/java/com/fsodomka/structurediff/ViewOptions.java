@@ -1,5 +1,6 @@
 package com.fsodomka.structurediff;
 
+import com.fsodomka.structurediff.reason.EditReasonsService;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
@@ -33,6 +34,7 @@ final class ViewOptions {
 		NESTED("structureDiff.showNested", false),
 		UNVERSIONED("structureDiff.showUnversioned", true),
 		FLASH("structureDiff.flashChanges", true),
+		EDIT_REASONS(EditReasonsService.SHOW_OPTION_KEY, true),
 		TREEMAP("structureDiff.showTreemap", false),
 		USAGES("structureDiff.showUsages", false);
 

@@ -21,6 +21,8 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
   removals are not shown).
 - Per file and member: `+` added, `~` modified, `−` removed counts, changed lines, renames/moves, and old vs new
   signature in the tooltip; test files have the test icon. Multiple VCS roots are grouped.
+- The IDE's errors and warnings on changed members, as icons and in the tooltip (levels in **Settings | Tools |
+  Structure Diff**); only files open in an editor have them, as the IDE analyses no others.
 - **Double-click**/**Enter** jumps to source, **middle-click** opens the diff at the member; context menu: Show Diff,
   Jump to Source, Show Member History, Copy Path.
 - **Show as Treemap** shows the changes as nested boxes sized by changed lines and colored by status (removed members
@@ -57,11 +59,37 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
 - When a `reviews/*.sarif` (or `.sarif.json`) file appears in a repository root, or you pick one from anywhere with
   **Open Review › Open File...**, its findings are highlighted in the editor with a gutter
   icon; the tooltip shows the finding and suggested fix. A newer review replaces the previous one.
-- The **Review Findings** tool window lists them by file and severity; double-click or Enter jumps to the code.
-  Open an older review, Reload, or Clear All.
+- The **Review** tool window lists them by file and severity; double-click or Enter jumps to the code.
+  Open an older review, Reload, or Clear Findings (edit reasons stay).
+- **Next / Previous Occurrence** (Ctrl+Alt+Down / Up, or the toolbar arrows) steps through findings and edit reasons,
+  opening each one.
 - Findings follow your edits; when the code is gone they are greyed as possibly fixed.
 - **Dismiss**, **Restore** and **Copy** findings; dismissed ones stay dismissed in later reviews.
 - The Structure Diff tree marks members and files that have findings (`⚠N`), also in Follow Git Log mode.
+
+## Edit Reasons
+
+- Shows **why** an agent made each change: the reasons it records in `reviews/edits/*.jsonl` (one file per session)
+  from the last 7 days. Skills can write marks in the same
+  format; those are purple everywhere.
+- The Structure Diff tree and treemap mark members and files with reasons (`✎`, `✎N` for several); the tooltip lists
+  them under **Why**, newest first, with their time: up to 5, each cut to 200 characters, the rest counted. A change
+  whose reason the agent hasn't recorded yet shows "reason pending"; agents record reasons at the end of their turn.
+- The editor shows a pencil in the gutter for each reason, at the first line of one of its changes; its tooltip names
+  the reason, and so does hovering the thin bars it draws over its other changed ranges. The pencil's color tells the
+  kind of change: green for added code, blue for modified and red for removed, like the tree and the treemap, grey when
+  the kind isn't known. A click on the pencil, or on one of its bars, tints every changed range of the reason. It
+  follows the code through later edits.
+- Reasons follow your edits while the IDE runs; ones recorded before it started are placed at their recorded lines and
+  marked "(approximate)".
+- The **Review** tool window lists them in an **Edit Reasons** section: one node per session or skill run
+  with its time span, then each reason with its time and the places it covers (file and line), in the order the
+  changes were made (a skill run in the order it wrote them). Only reasons on code the shown snapshot changes are
+  listed, as in the gutter. Select one for its full text; double-click, Enter or Next / Previous Occurrence opens it
+  with its range selected. A click on a pencil in the editor selects its place in the list. Grey places, like
+  "(approximate)" in the gutter, may have drifted from their recorded lines.
+- Reloaded when an edits file changes, when the reviews directory changes in settings, and with the toolbar's
+  **Refresh**, which also re-reads them from disk.
 
 ## Requirements
 

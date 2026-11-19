@@ -2,6 +2,7 @@
     <id>com.fsodomka.structurediff</id>
     <name>Structure Diff</name>
     <vendor>Frantisek Sodomka</vendor>
+    <resource-bundle>messages.StructureDiffBundle</resource-bundle>
 
     <description><![CDATA[
     <p>Review what AI coding agents changed &ndash; <b>Claude Code</b>, <b>OpenAI Codex</b>, <b>DeepSeek</b>, Cursor,
@@ -28,6 +29,9 @@
       <li>Per file and member: <b>+</b> added, <b>~</b> modified, <b>&minus;</b> removed counts, changed lines,
         renames/moves, and old vs new signature in the tooltip; test files have the test icon. Multiple VCS roots
         are grouped.</li>
+      <li>The IDE's errors and warnings on changed members, as icons and in the tooltip (levels in
+        <b>Settings | Tools | Structure Diff</b>); only files open in an editor have them, as the IDE analyses no
+        others.</li>
       <li><b>Double-click</b>/<b>Enter</b> jumps to source, <b>middle-click</b> opens the diff at the member;
         context menu: Show Diff, Jump to Source, Show Member History, Copy Path.</li>
       <li><b>Show as Treemap</b> shows the changes as nested boxes sized by changed lines and colored by status
@@ -67,11 +71,33 @@
     <ul>
       <li>When a <code>reviews/*.sarif</code> file appears, or you open a SARIF file from elsewhere with <b>Open Review</b>, its findings are highlighted in the editor with a gutter
         icon; the tooltip shows the finding and suggested fix.</li>
-      <li>The <b>Review Findings</b> tool window lists them by file and severity; double-click or Enter jumps to the code. Open an older
-        review, Reload, or Clear All.</li>
+      <li>The <b>Review</b> tool window lists them by file and severity; double-click or Enter jumps to the code. Open an older
+        review, Reload, or Clear Findings. <b>Next / Previous Occurrence</b> (Ctrl+Alt+Down / Up, or the toolbar arrows)
+        steps through findings and edit reasons.</li>
       <li>Findings follow your edits; when the code is gone they are greyed as possibly fixed.</li>
       <li><b>Dismiss</b>, <b>Restore</b> and <b>Copy</b> findings; dismissed ones stay dismissed in later reviews.</li>
       <li>The Structure Diff tree marks members and files that have findings (<b>&#9888;N</b>).</li>
+    </ul>
+
+    <h3>Edit Reasons</h3>
+    <ul>
+      <li>Shows <b>why</b> an agent made each change: the reasons it records in <code>reviews/edits/*.jsonl</code> (one file
+        per session) from the last 7 days. Marks written by skills show in
+        purple.</li>
+      <li>The Structure Diff tree and treemap mark members and files with reasons (<b>&#9998;</b>, <b>&#9998;N</b> for
+        several); the tooltip lists them under <b>Why</b>, newest first, with their time. A change whose reason is not
+        recorded yet shows "reason pending".</li>
+      <li>The editor shows a pencil (<b>&#9998;</b>) in the gutter for each reason, at the first line of one of its
+        changes; its tooltip names the reason, and so does hovering the thin bars over its other changed ranges. The
+        pencil's color tells the kind of change: green for added code, blue for modified and red for removed, like the
+        tree and the treemap, grey when the kind isn't known. A click on the pencil, or on one of its bars, tints every
+        changed range of the reason. It follows the code through later edits.</li>
+      <li>The <b>Review</b> tool window lists them in an <b>Edit Reasons</b> section, by session or skill
+        run and in the order the changes were made, each reason with the places it covers; only reasons on code the
+        shown changes include. Double-click, Enter or Next / Previous Occurrence opens a place with its range selected,
+        and a click on a gutter pencil selects its place in the list.</li>
+      <li>Reasons follow your edits while the IDE runs; ones recorded before it started are marked "(approximate)".
+        <b>Refresh</b> re-reads them from disk.</li>
     </ul>
     ]]></description>
 
@@ -90,6 +116,8 @@
         <toolWindow id="Member History" anchor="bottom" icon="AllIcons.Vcs.History" canCloseContents="true"
                     factoryClass="com.fsodomka.structurediff.history.MemberHistoryToolWindowFactory"/>
         <postStartupActivity implementation="com.fsodomka.structurediff.review.ReviewFindingsStartup"/>
+        <postStartupActivity implementation="com.fsodomka.structurediff.reason.EditReasonsStartup"/>
+        <diff.DiffExtension implementation="com.fsodomka.structurediff.reason.EditReasonsDiffExtension"/>
         <applicationService serviceImplementation="com.fsodomka.structurediff.settings.StructureDiffSettings"/>
         <applicationConfigurable parentId="tools" instance="com.fsodomka.structurediff.settings.StructureDiffConfigurable"
                                  id="com.fsodomka.structurediff.settings" displayName="Structure Diff"/>
@@ -107,6 +135,8 @@
 
     <projectListeners>
         <listener class="com.fsodomka.structurediff.review.ReviewFilesListener"
+                  topic="com.intellij.openapi.vfs.newvfs.BulkFileListener"/>
+        <listener class="com.fsodomka.structurediff.reason.EditReasonsFilesListener"
                   topic="com.intellij.openapi.vfs.newvfs.BulkFileListener"/>
     </projectListeners>
 </idea-plugin>

@@ -4,7 +4,7 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.util.text.StringUtil;
 
 /** Places a finding in the current text of its file, which may have changed since the review. */
-final class ReviewAnchor {
+public final class ReviewAnchor {
 	/** How far, in lines, the reviewed code may have moved and still count as the same place. */
 	private static final int MAX_MOVE_LINES = 50;
 
@@ -92,7 +92,7 @@ final class ReviewAnchor {
 	}
 
 	/** Offset of the first non-blank character of {@code line}; its end when it is blank. */
-	static int indentEnd(Document document, int line) {
+	public static int indentEnd(Document document, int line) {
 		CharSequence text = document.getImmutableCharSequence();
 		int start = document.getLineStartOffset(line);
 		int end = document.getLineEndOffset(line);

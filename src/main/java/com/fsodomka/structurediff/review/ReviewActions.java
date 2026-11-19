@@ -37,7 +37,7 @@ final class ReviewActions {
 	}
 
 	static AnAction showToolWindow(Project project) {
-		return action("Show Review Findings", AllIcons.Actions.Preview, () -> {
+		return action("Show Review", AllIcons.Actions.Preview, () -> {
 			ToolWindow toolWindow = ToolWindowManager.getInstance(project).getToolWindow(ReviewFindingsToolWindowFactory.ID);
 			if (toolWindow != null) {
 				toolWindow.activate(null);

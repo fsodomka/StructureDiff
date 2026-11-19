@@ -7,7 +7,7 @@ plugins {
 }
 
 group = 'com.fsodomka.structurediff'
-version = '2026.5.0'
+version = '2026.6.0'
 
 repositories {
     mavenCentral()
@@ -27,8 +27,15 @@ tasks.withType(JavaCompile).configureEach {
     options.compilerArgs.add("-Xlint:deprecation")
 }
 
+// The sandbox IDE Pilot runs in needs 2025.2 or newer (see ~/.gradle/init.d/idepilot.init.gradle), while the build
+// targets the oldest supported IDE: runIdePilot without an explicit -PplatformVersion uses the newest platform.
+def pilotSandbox = gradle.startParameter.taskNames.any { it.endsWith('runIdePilot') }
+def explicitPlatformVersion = gradle.startParameter.projectProperties.containsKey('platformVersion')
+def platformVersion = providers.gradleProperty(pilotSandbox && !explicitPlatformVersion ? 'latestPlatformVersion' : 'platformVersion')
+
 // e.g. 2026 for 2026.2.3: the layout of the platform modules changed in 2026.x
-def platformYear = providers.gradleProperty('platformVersion').get().tokenize('.')[0].toInteger()
+def platformYear = platformVersion.get().tokenize('.')[0].toInteger()
+
 // set by testLatest: the nested build compiles against another platform, so it must not share the classes and results
 def platformBuildDir = providers.gradleProperty('platformBuildDir')
 if (platformBuildDir.isPresent()) {
@@ -38,7 +45,7 @@ def platformLocalPath = providers.gradleProperty('platformLocalPath').filter { !
 
 dependencies {
     intellijPlatform {
-        intellijIdea(providers.gradleProperty('platformVersion'))
+        intellijIdea(platformVersion)
         // Git log and its changes browser, for "Follow Git Log"
         bundledModule('intellij.platform.vcs.impl')
         bundledModule('intellij.platform.vcs.log.impl')

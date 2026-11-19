@@ -7,7 +7,10 @@ import com.fsodomka.structurediff.ViewOptions.Option;
 import com.fsodomka.structurediff.diff.FileDiff;
 import com.fsodomka.structurediff.diff.MemberDiff;
 import com.fsodomka.structurediff.diff.RevisionContent;
+import com.fsodomka.structurediff.reason.EditReasonsListener;
 import com.fsodomka.structurediff.review.FindingMembers.MemberFinding;
+import com.fsodomka.structurediff.reason.EditReasonMembers.MemberReason;
+import com.fsodomka.structurediff.reason.EditReasonsService;
 import com.fsodomka.structurediff.review.ReviewFindingsListener;
 import com.fsodomka.structurediff.review.ReviewFindingsToolWindowFactory;
 import com.fsodomka.structurediff.review.ReviewSeverity;
@@ -27,6 +30,7 @@ import com.intellij.openapi.fileEditor.FileEditor;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.FileEditorManagerListener;
 import com.intellij.openapi.project.DumbAwareAction;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.openapi.util.Disposer;
@@ -114,6 +118,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	private volatile boolean showing;
 	/** A refresh or findings update was skipped while hidden; done when the panel shows again. */
 	private volatile boolean stale;
+	/** Set by {@link #dispose()}: a refresh finishing after the mode switched must not apply to this panel. */
+	private volatile boolean disposed;
 
 	/** @param extraActions added to the toolbar before Expand All and Collapse All */
 	StructureDiffPanel(Project project, ChangeSource source, AnAction... extraActions) {
@@ -132,7 +138,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				() -> options.get(Option.TREEMAP) && options.fill() == ViewOptions.Fill.COVERAGE, this::repaintViews, this);
 		treemap = new TreemapPanel(tree, DiffLabels::speedSearchText,
 				node -> DiffTreeNodes.keyPart(node.getUserObject()), selection::jumpToSource, selection::openSelected,
-				signals::findingsOf, signals::showFindings, signals::diagnosticsOf, signals::notAnalysed, signals::openDiagnostic,
+				signals::findingsOf, signals::showFindings, signals::reasonsOf, this::showFirstReason, signals::diagnosticsOf, signals::openDiagnostic,
 				this::isTestFile, flashes::get, usages::relationOf, usages::focus, () -> this.loading, () -> tree.getEmptyText().getText(), options::fill,
 				node -> coverage.countsOf(node), () -> coverage.legend(), () -> coverage.overlay());
 		renderer = new DiffTreeRenderer(project, signals, flashes, usages);
@@ -176,6 +182,10 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 						signals.openDiagnostic((DefaultMutableTreeNode) path.getLastPathComponent());
 						e.consume();
 					}
+					else if (onReasonMark(path, e.getX())) {
+						showFirstReason((DefaultMutableTreeNode) path.getLastPathComponent());
+						e.consume();
+					}
 				}
 			}
 
@@ -183,7 +193,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			public void mouseMoved(MouseEvent e) {
 				// a hand over a severity icon, which opens its findings or the diagnostic
 				TreePath path = tree.getPathForLocation(e.getX(), e.getY());
-				boolean onIcon = path != null && signalAt(path, e.getX()) != null;
+				boolean onIcon = path != null && (signalAt(path, e.getX()) != null || onReasonMark(path, e.getX()));
 				tree.setCursor(onIcon ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : null);
 			}
 		};
@@ -215,6 +225,10 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 			@Override
 			public void actionPerformed(@NotNull AnActionEvent e) {
 				scheduleRefresh();
+				// also re-reads the edit reasons from disk, which the agent writes outside the IDE
+				if (EditReasonsService.isEnabled()) {
+					EditReasonsService.getInstance(project).refreshAndLoad();
+				}
 			}
 		});
 		group.add(new DumbAwareAction("Export Diff for Review",
@@ -242,6 +256,9 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		// the filters, set once and left, in one dropdown; the buttons that switch what the panel shows stay on the toolbar
 		DefaultActionGroup view = DefaultActionGroup.createPopupGroup(() -> "View Options");
 		view.getTemplatePresentation().setIcon(AllIcons.Actions.Show);
+		view.add(options.toggle(Option.EDIT_REASONS, "Show Edit Reasons",
+				"Show why the agent made each change in tooltips, mark nodes with a pencil and put one in the editor gutter",
+				AllIcons.Actions.Edit, () -> EditReasonsService.getInstance(project).viewOptionChanged()));
 		view.add(options.toggle(Option.NESTED, "Show Nested Changes",
 				"Show changes inside functions, components and object literals, not only inside classes", AllIcons.Actions.ShowAsTree,
 				() -> show(files, false)));
@@ -326,6 +343,26 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				stale = true;
 			}
 		});
+		project.getMessageBus().connect(this).<EditReasonsListener>subscribe(EditReasonsListener.TOPIC, () -> {
+			if (showing) {
+				signals.updateReasons();
+			}
+			else {
+				stale = true;
+			}
+		});
+		// reasons are placed on members by PSI, which indexing withholds: place them again once it ends
+		project.getMessageBus().connect(this).subscribe(DumbService.DUMB_MODE, new DumbService.DumbModeListener() {
+			@Override
+			public void exitDumbMode() {
+				if (showing) {
+					signals.updateReasons();
+				}
+				else {
+					stale = true;
+				}
+			}
+		});
 		ApplicationManager.getApplication().getMessageBus().connect(this)
 				.<StructureDiffSettings.DiagnosticLevelsListener>subscribe(StructureDiffSettings.DiagnosticLevelsListener.TOPIC, this::diagnosticsChanged);
 		project.getMessageBus().connect(this).subscribe(DaemonCodeAnalyzer.DAEMON_EVENT_TOPIC, new DaemonCodeAnalyzer.DaemonListener() {
@@ -358,6 +395,9 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 					loadSettings();
 					// the treemap's fill is shared by the panels, and another one may have changed it meanwhile
 					coverage.update();
+					// the editor gutter's kinds follow the panel that shows; the other mode's panel may have pushed its
+					// snapshot last, and this one does not refresh again until something changes
+					EditReasonsService.getInstance(project).snapshotChanged(files);
 				}
 				if (showing && stale) {
 					stale = false;
@@ -386,6 +426,9 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		}
 		if (changed.contains(Option.FLASH) && !options.get(Option.FLASH)) {
 			flashes.clear();
+		}
+		if (changed.contains(Option.EDIT_REASONS)) {
+			EditReasonsService.getInstance(project).viewOptionChanged();
 		}
 		if (changed.contains(Option.NESTED) || changed.contains(Option.UNVERSIONED) || changed.contains(Option.FLASH)) {
 			show(files, false);
@@ -460,22 +503,31 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 				// cancels the computation of an older refresh, whose result would be discarded anyway
 				.coalesceBy(this)
 				.finishOnUiThread(ModalityState.any(), snapshot -> {
-					if (current == generation.get()) {
-						tree.setPaintBusy(false);
-						loading = false;
-						tree.getEmptyText().setText(StatusText.getDefaultEmptyText());
-						files = snapshot.files();
-						vcsRoots = snapshot.roots();
-						projectRoot = snapshot.projectRoot();
-						unversionedPaths = snapshot.unversioned();
-						testPaths = snapshot.tests();
-						renderer.update(snapshot);
-						show(snapshot.files(), highlight);
-						// the tree may show other members now, and edits may have moved the findings into other ones
-						signals.updateFindings();
-						signals.updateDiagnostics();
-						coverage.update();
+					// a finish already queued when the mode switched must not touch the new panel's service or this
+					// disposed one: it would put its old snapshot back into the editor's kinds, seen in the sandbox
+					if (current != generation.get() || project.isDisposed() || disposed) {
+						return;
 					}
+					tree.setPaintBusy(false);
+					loading = false;
+					tree.getEmptyText().setText(StatusText.getDefaultEmptyText());
+					files = snapshot.files();
+					vcsRoots = snapshot.roots();
+					projectRoot = snapshot.projectRoot();
+					unversionedPaths = snapshot.unversioned();
+					testPaths = snapshot.tests();
+					renderer.update(snapshot);
+					show(files, highlight);
+					// the tree may show other members now, and edits may have moved the findings into other ones
+					signals.updateFindings();
+					// the editor gutter names the kind of change at each reason from this snapshot's diff; only from the
+					// panel that is showing, so a hidden or disposed one cannot put its mode's kinds back
+					if (showing) {
+						EditReasonsService.getInstance(project).snapshotChanged(files);
+					}
+					signals.updateReasons();
+					signals.updateDiagnostics();
+					coverage.update();
 				})
 				.submit(AppExecutorUtil.getAppExecutorService())
 				// a cancellation by coalesceBy comes with a newer generation, so only an error of the latest refresh clears it
@@ -662,6 +714,30 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		return !found.isEmpty() && x >= end - found.getFirst().icon().getIconWidth() && x < end ? Signal.REVIEW : null;
 	}
 
+	/** Whether {@code x} is on the pencil of the reason mark of the node at {@code path}. */
+	private boolean onReasonMark(TreePath path, int x) {
+		DefaultMutableTreeNode node = (DefaultMutableTreeNode) path.getLastPathComponent();
+		Rectangle bounds = tree.getPathBounds(path);
+		if (bounds == null || node.getUserObject() instanceof Ghost || MemberReason.first(signals.reasonsOf(node)) == null) {
+			return false;
+		}
+		Component component = tree.getCellRenderer().getTreeCellRendererComponent(tree, node, tree.isPathSelected(path),
+				tree.isExpanded(path), node.isLeaf(), tree.getRowForPath(path), false);
+		if (!(component instanceof DiffTreeRenderer renderer)) {
+			return false;
+		}
+		int index = renderer.findFragmentAt(x - bounds.x);
+		return index >= 0 && renderer.getFragmentTag(index) == DiffTreeRenderer.REASON_MARK;
+	}
+
+	/** Shows the node's first reason in the editor, as its gutter pencil does. */
+	private void showFirstReason(DefaultMutableTreeNode node) {
+		MemberReason first = MemberReason.first(signals.reasonsOf(node));
+		if (first != null) {
+			EditReasonsService.getInstance(project).showReason(first.anchored());
+		}
+	}
+
 	/** Whether {@code node} is a changed file in test sources. */
 	private boolean isTestFile(DefaultMutableTreeNode node) {
 		return node.getUserObject() instanceof FileDiff file && testPaths.contains(file.path());
@@ -703,6 +779,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 
 	@Override
 	public void dispose() {
+		disposed = true;
 		flashes.stop();
 	}
 }

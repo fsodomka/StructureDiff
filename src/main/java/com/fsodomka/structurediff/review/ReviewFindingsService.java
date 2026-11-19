@@ -22,8 +22,6 @@ import com.intellij.openapi.fileEditor.FileDocumentManagerListener;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vcs.ProjectLevelVcsManager;
-import com.intellij.openapi.vcs.VcsRoot;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -166,8 +164,7 @@ public final class ReviewFindingsService implements PersistentStateComponent<Rev
 	}
 
 	private static @Nullable VirtualFile reviewsDir(VirtualFile root) {
-		VirtualFile dir = root.findFileByRelativePath(StructureDiffSettings.getInstance().reviewsDir());
-		return dir != null && dir.isDirectory() ? dir : null;
+		return ReviewsDirs.reviewsDir(root);
 	}
 
 	/** Shows the newest reviews of the changed reviews directory instead of the shown ones. */
@@ -415,15 +412,7 @@ public final class ReviewFindingsService implements PersistentStateComponent<Rev
 	}
 
 	private List<VirtualFile> roots() {
-		Set<VirtualFile> roots = new LinkedHashSet<>();
-		for (VcsRoot root : ProjectLevelVcsManager.getInstance(project).getAllVcsRoots()) {
-			roots.add(root.getPath());
-		}
-		VirtualFile projectDir = ProjectUtil.guessProjectDir(project);
-		if (projectDir != null) {
-			roots.add(projectDir);
-		}
-		return List.copyOf(roots);
+		return ReviewsDirs.roots(project);
 	}
 
 	private static @Nullable VirtualFile newestReview(VirtualFile root) {

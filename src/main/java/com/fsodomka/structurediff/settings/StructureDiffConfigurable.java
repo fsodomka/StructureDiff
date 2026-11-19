@@ -7,6 +7,7 @@ import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.FormBuilder;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.JComponent;
@@ -49,6 +50,9 @@ final class StructureDiffConfigurable implements SearchableConfigurable {
 				.addComponent(copyCommand)
 				.addSeparator()
 				.addComponent(new JBLabel("Show the IDE's diagnostics on changed members:"))
+				// a hint under the label, left-aligned with it: addTooltip would indent it to the fields' column
+				.addComponent(new JBLabel("Only files open in an editor: the IDE analyses no others.",
+						UIUtil.ComponentStyle.SMALL, UIUtil.FontColor.BRIGHTER), 0)
 				.addComponent(showErrors)
 				.addComponent(showWarnings)
 				.addComponent(showWeakWarnings)

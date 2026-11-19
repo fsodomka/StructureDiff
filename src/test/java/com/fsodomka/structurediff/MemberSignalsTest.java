@@ -3,6 +3,10 @@ package com.fsodomka.structurediff;
 import com.fsodomka.structurediff.DiagnosticMembers.MemberDiagnostic;
 import com.fsodomka.structurediff.diff.FileDiff;
 import com.fsodomka.structurediff.diff.MemberDiff;
+import com.fsodomka.structurediff.reason.ChangeKind;
+import com.fsodomka.structurediff.reason.EditReason;
+import com.fsodomka.structurediff.reason.EditReasonMembers.MemberReason;
+import com.fsodomka.structurediff.reason.EditReasonsService;
 import com.fsodomka.structurediff.review.FindingMembers.MemberFinding;
 import com.fsodomka.structurediff.review.ReviewSeverity;
 import com.intellij.icons.AllIcons;
@@ -13,6 +17,7 @@ import com.intellij.ui.RowIcon;
 
 import javax.swing.*;
 import javax.swing.tree.DefaultMutableTreeNode;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -124,14 +129,61 @@ public class MemberSignalsTest extends BasePlatformTestCase {
 			diags.add(diagnostic(HighlightSeverity.ERROR, "e" + i + " <x>"));
 		}
 
-		String html = MemberSignals.withSignals("lines", List.of(finding("CRITICAL · f")), diags, true);
+		String html = MemberSignals.withSignals("lines", List.of(finding("CRITICAL · f")), diags);
 
-		assertTrue(html, html.startsWith("<html>lines<br><br><b>Review</b><br>CRITICAL · f<br><b>IDE</b><br>Error · e0 &lt;x&gt;"));
+		assertTrue(html, html.startsWith("<html>lines<br><br><b>Review</b><br>CRITICAL · f<br><br><b>IDE</b><br>Error · e0 &lt;x&gt;"));
 		assertTrue(html, html.contains("e4"));
 		assertFalse(html, html.contains("e5"));
-		assertTrue(html, html.contains("<br>and 2 more<br><i>Not analysed by the IDE"));
-		assertEquals("plain", MemberSignals.withSignals("plain", List.of(), List.of(), false));
-		assertFalse(MemberSignals.withSignals("t", List.of(), diags, false).contains("Review"));
+		assertTrue(html, html.endsWith("<br>and 2 more</html>"));
+		assertEquals("plain", MemberSignals.withSignals("plain", List.of(), List.of()));
+		assertFalse(MemberSignals.withSignals("t", List.of(), diags).contains("Review"));
+	}
+
+	public void testTooltipListsEditReasonsFirst() {
+		Instant time = Instant.parse("2026-11-15T12:00:00Z");
+		// as the gutter hover names it: the day too, as the records span a week
+		String hhmm = EditReason.when(time);
+		List<MemberReason> reasons = List.of(
+				new MemberReason(List.of(), "Keep <b> escaped.", false, false, time, null),
+				new MemberReason(List.of(), null, true, false, time, null),
+				new MemberReason(List.of(), "Loaded later.", false, true, time, null));
+
+		String html = MemberSignals.withSignals("lines", List.of(finding("CRITICAL · f")), List.of(), reasons);
+
+		assertTrue(html, html.startsWith("<html>lines<br><br><b>Why</b><br>" + hhmm + " · Keep &lt;b&gt; escaped.<br>"
+				+ hhmm + " · <i>reason pending</i><br>" + hhmm + " · Loaded later. <i>(approximate)</i><br><br><b>Review</b>"));
+	}
+
+	public void testTooltipShortensLongReason() {
+		String reason = "x".repeat(MemberSignals.MAX_TOOLTIP_REASON_LENGTH + 50);
+
+		String html = MemberSignals.withSignals("lines", List.of(), List.of(),
+				List.of(new MemberReason(List.of(), reason, false, false, Instant.now(), null)));
+
+		assertTrue(html, html.contains(" · " + "x".repeat(MemberSignals.MAX_TOOLTIP_REASON_LENGTH - 1) + "…</html>"));
+	}
+
+	public void testWrappedBreaksBetweenWordsAndEscapes() {
+		String word = "a".repeat(MemberSignals.TOOLTIP_REASON_LINE - 5);
+
+		// the line is counted in characters of the text, not of its escaped form
+		assertEquals(word + " &lt;b&gt;<br>&lt;i&gt;", MemberSignals.wrapped(word + " <b> <i>"));
+		assertEquals("short words stay on one line", MemberSignals.wrapped("short words  stay on one line"));
+	}
+
+	public void testDistinctKeepsEachReasonOnceAndOnePending() {
+		Instant older = Instant.parse("2026-11-15T12:00:00Z");
+		Instant newer = older.plusSeconds(60);
+		MemberReason a = new MemberReason(List.of(), "Same.", false, false, newer, null);
+		MemberReason b = new MemberReason(List.of(), "Other.", false, false, newer, null);
+		MemberReason pending = new MemberReason(List.of(), null, true, false, newer, null);
+
+		List<MemberReason> shown = MemberSignals.distinct(List.of(a, b, new MemberReason(List.of(), "Same.", false, false, older, null),
+				pending, new MemberReason(List.of(), null, true, false, older, null)));
+
+		assertEquals(List.of(a, b, pending), shown);
+		List<MemberReason> unique = List.of(a, b);
+		assertSame(unique, MemberSignals.distinct(unique));
 	}
 
 	public void testSignalIconsFollowTheNodeIconReviewFirst() {
@@ -153,5 +205,21 @@ public class MemberSignalsTest extends BasePlatformTestCase {
 		assertEquals(List.of(), MemberSignals.findingsOf(repoNode, findings));
 		assertEquals(List.of(), MemberSignals.findingsOf(orphan, findings));
 		assertEquals(List.of(), MemberSignals.findingsOf(new DefaultMutableTreeNode(file("/p/a.xml")), Map.of()));
+	}
+
+	/** A click on a node's mark shows its earliest reason, which its newest-first list holds last; unplaced ones don't count. */
+	public void testFirstReasonIsTheEarliestPlacedOne() {
+		Instant older = Instant.parse("2026-11-01T10:00:00Z");
+		Instant newer = older.plusSeconds(60);
+		EditReasonsService.Anchored placed = new EditReasonsService.Anchored(null, null, null, null, false);
+		MemberReason unplaced = new MemberReason(List.of(), "Oldest, unplaced.", false, false, older.minusSeconds(60), null);
+		MemberReason early = new MemberReason(List.of(), "Early.", false, false, older, null, false, placed);
+		MemberReason late = new MemberReason(List.of(), "Late.", false, false, newer, null, false, placed);
+
+		assertEquals(early, MemberReason.first(List.of(late, early, unplaced)));
+		// one on changed code wins over an earlier one the snapshot doesn't show changed: only it can be tinted
+		MemberReason changed = new MemberReason(List.of(), "Changed.", false, false, newer, ChangeKind.MODIFIED, false, placed);
+		assertEquals(changed, MemberReason.first(List.of(changed, early)));
+		assertNull(MemberReason.first(List.of(unplaced)));
 	}
 }

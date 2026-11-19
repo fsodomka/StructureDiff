@@ -1,0 +1,10 @@
+root = true
+
+# The Java sources are tab-indented; without this the IDE's default (4 spaces) re-indents what its tools touch.
+[*.java]
+indent_style = tab
+ij_java_class_count_to_use_import_on_demand = 999
+ij_java_names_count_to_use_static_import_on_demand = 999
+ij_java_packages_to_use_import_on_demand =
+ij_java_doc_enable_formatting = false
+ij_java_keep_blank_lines_in_declarations = 1

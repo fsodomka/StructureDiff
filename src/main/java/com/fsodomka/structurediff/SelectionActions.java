@@ -6,16 +6,6 @@ import com.fsodomka.structurediff.diff.MemberLocator;
 import com.fsodomka.structurediff.history.MemberHistoryToolWindowFactory;
 import com.fsodomka.structurediff.source.ChangeSource;
 import com.fsodomka.structurediff.source.LocalChangeSource;
-import com.intellij.diff.DiffContentFactory;
-import com.intellij.diff.DiffManager;
-import com.intellij.diff.contents.DiffContent;
-import com.intellij.diff.editor.DiffEditorViewerFileEditor;
-import com.intellij.diff.impl.DiffRequestProcessor;
-import com.intellij.diff.requests.SimpleDiffRequest;
-import com.intellij.diff.tools.fragmented.UnifiedDiffViewer;
-import com.intellij.diff.tools.util.side.TwosideTextDiffViewer;
-import com.intellij.diff.util.DiffUserDataKeys;
-import com.intellij.diff.util.DiffUtil;
 import com.intellij.diff.util.Side;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.Disposable;
@@ -26,8 +16,6 @@ import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
-import com.intellij.openapi.fileEditor.FileEditor;
-import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.project.DumbAwareAction;
@@ -36,7 +24,6 @@ import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.Computable;
-import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
@@ -79,9 +66,6 @@ final class SelectionActions {
 		this.tree = tree;
 		this.parent = parent;
 	}
-
-	/** The {@link FileDiff} a diff request was opened from, so a later open of the same file can reuse its tab. */
-	private static final Key<FileDiff> OPENED_FILE_DIFF = Key.create("structureDiff.openedFileDiff");
 
 	/** Show Diff (Ctrl+D), Jump to Source (F4) and Copy Path, with the shortcuts of the matching IDE actions. */
 	void installPopupMenu(JComponent treemap) {
@@ -308,49 +292,7 @@ final class SelectionActions {
 				scrollTo = Pair.create(Side.LEFT, StringUtil.offsetToLineNumber(file.beforeText(), member.beforeOffset()));
 			}
 		}
-		if (scrollOpenDiff(file, scrollTo)) {
-			return true;
-		}
-		DiffContentFactory factory = DiffContentFactory.getInstance();
-		DiffContent before = factory.create(project, StringUtil.notNullize(file.beforeText()), file.fileType());
-		VirtualFile afterFile = file.change().getAfterRevision() instanceof CurrentContentRevision current
-				? current.getVirtualFile() : null;
-		DiffContent after = afterFile != null
-				? factory.create(project, afterFile)
-				: factory.create(project, StringUtil.notNullize(file.afterText()), file.fileType());
-		SimpleDiffRequest request = new SimpleDiffRequest(file.path(), before, after, "Before", "After");
-		request.putUserData(OPENED_FILE_DIFF, file);
-		if (scrollTo != null) {
-			request.putUserData(DiffUserDataKeys.SCROLL_TO_LINE, scrollTo);
-		}
-		DiffManager.getInstance().showDiff(project, request);
+		FileDiffs.open(project, file, scrollTo);
 		return true;
-	}
-
-	/**
-	 * Scrolls a diff tab already opened for {@code file} to {@code scrollTo} and selects the tab. Only a tab opened from
-	 * the same {@link FileDiff} instance is reused, so a refresh that changed the before-text opens a fresh diff.
-	 */
-	private boolean scrollOpenDiff(FileDiff file, Pair<Side, Integer> scrollTo) {
-		FileEditorManager editors = FileEditorManager.getInstance(project);
-		for (FileEditor editor : editors.getAllEditors()) {
-			if (!(editor instanceof DiffEditorViewerFileEditor diffEditor)
-					|| !(diffEditor.getEditorViewer() instanceof DiffRequestProcessor processor)
-					|| processor.getActiveRequest().getUserData(OPENED_FILE_DIFF) != file) {
-				continue;
-			}
-			new OpenFileDescriptor(project, diffEditor.getFile()).navigate(true);
-			if (scrollTo != null) {
-				if (processor.getActiveViewer() instanceof TwosideTextDiffViewer twoside) {
-					DiffUtil.scrollEditor(twoside.getEditor(scrollTo.first), scrollTo.second, false);
-				}
-				else if (processor.getActiveViewer() instanceof UnifiedDiffViewer unified) {
-					DiffUtil.scrollEditor(unified.getEditor(),
-							unified.transferLineToOneside(scrollTo.first, scrollTo.second), false);
-				}
-			}
-			return true;
-		}
-		return false;
 	}
 }

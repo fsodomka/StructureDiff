@@ -7,6 +7,7 @@ import com.fsodomka.structurediff.diff.MemberDiff;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.ui.JBColor;
 import com.intellij.ui.SimpleColoredComponent;
 import com.intellij.ui.SimpleTextAttributes;
 
@@ -63,7 +64,9 @@ final class DiffLabels {
 
 	private static void appendCount(SimpleColoredComponent component, String prefix, int count, FileStatus status, int style) {
 		if (count > 0) {
-			component.append(" " + prefix + count, new SimpleTextAttributes(style, status.getColor()));
+			// resolved when painted, so a theme or color scheme switch recolors the counts without rebuilding the row
+			// deleted in the tree's red for deleted names, not the IDE's grey, which reads as unchanged
+			component.append(" " + prefix + count, new SimpleTextAttributes(style, JBColor.lazy(() -> StatusColors.ofText(status))));
 		}
 	}
 
