@@ -5,6 +5,8 @@ Copilot, Gemini CLI and others. It shows changes at member level (added, modifie
 fields) in a tree like the Structure tool window, and shows AI code-review findings (SARIF) right in the editor.
 Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaScript, ...).
 
+[![JetBrains Marketplace](https://img.shields.io/jetbrains/plugin/v/35062-structure-diff.svg)](https://plugins.jetbrains.com/plugin/35062-structure-diff)
+
 ## Structure Diff tool window
 
 - **Modes**: **Uncommitted** changes; **Branch vs main** — everything the branch changed since it forked from

@@ -7,7 +7,7 @@ plugins {
 }
 
 group = 'com.fsodomka.structurediff'
-version = '2026.6.0'
+version = '2026.7.0'
 
 repositories {
     mavenCentral()
@@ -109,6 +109,19 @@ tasks.register('testLatest', GradleBuild) {
 }
 tasks.named('check') {
     dependsOn 'testLatest'
+}
+
+// The IDE's coverage runner adds a JaCoCo agent to the test JVM, which loads the plugin through PathClassLoader, so its classes
+// have no code source and the agent skips them: the run holds no hits for them. The IDE adds the agent after this script is
+// evaluated (an init script), so it is changed just before the tests start.
+tasks.named('test') {
+    doFirst {
+        jvmArgs = jvmArgs.collect {
+            it.startsWith('-javaagent:') && it.contains('jacocoagent') && !it.contains('inclnolocationclasses')
+                    ? it + ',inclnolocationclasses=true,exclclassloader=jdk.internal.reflect.DelegatingClassLoader:sun.reflect.DelegatingClassLoader'
+                    : it
+        }
+    }
 }
 
 tasks.withType(RunIdeTask).configureEach {
