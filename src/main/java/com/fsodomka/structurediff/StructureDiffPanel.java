@@ -107,6 +107,7 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 	/** The treemap fill chooser, shown only with the treemap; null until the constructor creates it. */
 	private @Nullable ActionToolbar fillToolbar;
 	private final CoverageState coverage;
+	private final ChurnState churn;
 	private final DiffTreeRenderer renderer;
 	/** A refresh is in progress, from the start until the first one finishes; shown by the treemap, the tree paints busy. */
 	private boolean loading = true;
@@ -136,11 +137,14 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		usages = new UsagesController(project, usagesPanel, tree, this::repaintViews, this);
 		coverage = new CoverageState(project, () -> shownFiles(files),
 				() -> options.get(Option.TREEMAP) && options.fill() == ViewOptions.Fill.COVERAGE, this::repaintViews, this);
+		churn = new ChurnState(project, source, () -> shownFiles(files),
+				() -> options.get(Option.TREEMAP) && options.fill() == ViewOptions.Fill.CHURN, this::repaintViews, this);
 		treemap = new TreemapPanel(tree, DiffLabels::speedSearchText,
 				node -> DiffTreeNodes.keyPart(node.getUserObject()), selection::jumpToSource, selection::openSelected,
 				signals::findingsOf, signals::showFindings, signals::reasonsOf, this::showFirstReason, signals::diagnosticsOf, signals::openDiagnostic,
 				this::isTestFile, flashes::get, usages::relationOf, usages::focus, () -> this.loading, () -> tree.getEmptyText().getText(), options::fill,
-				node -> coverage.countsOf(node), () -> coverage.legend(), () -> coverage.overlay());
+				node -> coverage.countsOf(node), () -> coverage.legend(), churn::churnOf, churn::legend,
+				() -> options.fill() == ViewOptions.Fill.CHURN ? churn.overlay() : coverage.overlay());
 		renderer = new DiffTreeRenderer(project, signals, flashes, usages);
 
 		installTree();
@@ -305,12 +309,13 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		// the treemap's colors at the end of the summary row, which describes what the treemap shows
 		ActionToolbar fillToolbar = this.fillToolbar = ActionManager.getInstance().createActionToolbar("StructureDiff.TreemapFill",
 				new DefaultActionGroup(options.fillChooser(() -> options.get(Option.TREEMAP),
-						fill -> fill != ViewOptions.Fill.COVERAGE || coverage.available())), true);
+						this::fillApplies)), true);
 		// the fill is shared, so a choice in another panel, even another project's, recolors a treemap shown meanwhile;
 		// a hidden panel updates its coverage when shown
 		ViewOptions.onFillChange(() -> {
 			if (showing) {
 				coverage.update();
+				churn.update();
 			}
 			treemap.repaint();
 			fillToolbar.updateActionsAsync();
@@ -391,10 +396,17 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		addHierarchyListener(e -> {
 			if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0) {
 				showing = isShowing();
+				if (!showing) {
+					options.rememberFill(this::fillApplies);
+				}
 				if (showing) {
 					loadSettings();
-					// the treemap's fill is shared by the panels, and another one may have changed it meanwhile
+					// the treemap's fill is shared by the panels; one that does not apply here, as Churn in Uncommitted,
+					// gives way to the fill this panel had when it was last shown
+					options.restoreFill(this::fillApplies);
+					// another one may have changed the fill meanwhile
 					coverage.update();
+					churn.update();
 					// the editor gutter's kinds follow the panel that shows; the other mode's panel may have pushed its
 					// snapshot last, and this one does not refresh again until something changes
 					EditReasonsService.getInstance(project).snapshotChanged(files);
@@ -510,7 +522,9 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 					}
 					tree.setPaintBusy(false);
 					loading = false;
-					tree.getEmptyText().setText(StatusText.getDefaultEmptyText());
+					// no commit selected is not "nothing to show": there is something to do
+					tree.getEmptyText().setText(source instanceof CommitChangeSource commits && commits.commitCount() == 0
+							? "Select commits from the Git log" : StatusText.getDefaultEmptyText());
 					files = snapshot.files();
 					vcsRoots = snapshot.roots();
 					projectRoot = snapshot.projectRoot();
@@ -528,6 +542,8 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 					signals.updateReasons();
 					signals.updateDiagnostics();
 					coverage.update();
+					// the commits may have changed under the same files
+					churn.reload();
 				})
 				.submit(AppExecutorUtil.getAppExecutorService())
 				// a cancellation by coalesceBy comes with a newer generation, so only an error of the latest refresh clears it
@@ -756,10 +772,20 @@ final class StructureDiffPanel extends SimpleToolWindowPanel implements Disposab
 		return options.get(Option.USAGES) && !(source instanceof CommitChangeSource);
 	}
 
+	/** Whether {@code fill} applies to this panel's changes: Coverage needs the plugin, Churn needs commits. */
+	private boolean fillApplies(ViewOptions.Fill fill) {
+		return switch (fill) {
+			case COVERAGE -> coverage.available();
+			case CHURN -> churn.available();
+			default -> true;
+		};
+	}
+
 	/** Shows the tree or the treemap, with the {@link #usagesPanel} below while {@link #usagesShown}. */
 	private void updateContent() {
-		// the Coverage fill computes only while the treemap shows
+		// the Coverage and Churn fills compute only while the treemap shows
 		coverage.update();
+		churn.update();
 		JComponent main = options.get(Option.TREEMAP) ? treemap : treeScroll;
 		// its chooser shows only with the treemap, and a toolbar updates on its own only on later UI activity
 		if (fillToolbar != null) {

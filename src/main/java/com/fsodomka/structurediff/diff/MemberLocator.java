@@ -251,6 +251,33 @@ public final class MemberLocator {
 		return result;
 	}
 
+	/**
+	 * The text range of every member of {@code text} by its key path, outermost key first, as {@link StructureDiffComputer#diff}
+	 * keys them; empty when the file type has no tree-based structure view or the text is too long. Call inside a read action.
+	 */
+	public static Map<List<String>, TextRange> memberRanges(Project project, String fileName, FileType fileType, CharSequence text) {
+		if (text.length() > StructureDiffComputer.MAX_STRUCTURE_LENGTH) {
+			return Map.of();
+		}
+		return withStructure(project, fileName, fileType, text, Map.of(), (root, psi) -> {
+			Map<List<String>, TextRange> ranges = new HashMap<>();
+			collectRanges(root, psi, List.of(), ranges);
+			return ranges;
+		});
+	}
+
+	private static void collectRanges(TreeElement parent, PsiFile psi, List<String> path, Map<List<String>, TextRange> ranges) {
+		keyedChildren(parent, psi).forEach((key, child) -> {
+			List<String> keyPath = new ArrayList<>(path);
+			keyPath.add(key);
+			PsiElement element = element(child);
+			if (element != null) {
+				ranges.put(keyPath, element.getTextRange());
+			}
+			collectRanges(child, psi, keyPath, ranges);
+		});
+	}
+
 	/** Children of {@code parent} declared in {@code file} by key: the label, with {@code #n} for the n-th same label. */
 	static Map<String, TreeElement> keyedChildren(TreeElement parent, PsiFile file) {
 		Map<String, TreeElement> result = new LinkedHashMap<>();

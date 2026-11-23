@@ -9,7 +9,7 @@ import java.util.function.Function;
 public class EditReasonOrderTest extends TestCase {
 	private static EditReason reason(String session, String id, String file, int line, String reason, String time,
 									 String source, int seq) {
-		return new EditReason(id, "Edit", file, line, line, null, reason, Instant.parse(time), source, session, seq);
+		return new EditReason(id, "Edit", file, line, line, null, reason, Instant.parse(time), source, session, null, seq);
 	}
 
 	private static List<List<String>> order(List<EditReason> reasons) {
@@ -58,13 +58,13 @@ public class EditReasonOrderTest extends TestCase {
 		assertEquals(Instant.parse("2026-11-17T11:00:00Z"), runs.getFirst().earliest());
 	}
 
-	public void testPendingAndFilelessReasonsAreLeftOut() {
+	public void testFilelessReasonsAreLeftOutPendingOnesKept() {
 		List<EditReason> reasons = List.of(
 				reason("s", "pending", "A.java", 1, null, "2026-11-17T10:00:00Z", "pending", 0),
 				reason("s", "fileless", null, -1, "r", "2026-11-17T10:00:00Z", "agent", 1),
 				reason("s", "kept", "A.java", 2, "r", "2026-11-17T10:00:00Z", "agent", 2));
 
-		assertEquals(List.of(List.of("kept")), order(reasons));
-		assertEquals(List.of(), EditReasonOrder.runs(reasons.subList(0, 2), Function.identity()));
+		assertEquals(List.of(List.of("pending", "kept")), order(reasons));
+		assertEquals(List.of(), EditReasonOrder.runs(reasons.subList(1, 2), Function.identity()));
 	}
 }

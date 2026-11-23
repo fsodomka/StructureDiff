@@ -201,14 +201,20 @@ public final class ReviewFindingsService implements PersistentStateComponent<Rev
 	 */
 	void reload() {
 		state.cleared.clear();
-		VirtualFile[] dirs = roots().stream().map(ReviewFindingsService::reviewsDir).filter(Objects::nonNull).toArray(VirtualFile[]::new);
-		if (dirs.length == 0) {
-			loadNewest();
-			return;
-		}
-		// marked dirty, else the refresh trusts the watcher that missed the change
-		VfsUtil.markDirty(true, true, dirs);
-		RefreshQueue.getInstance().refresh(true, true, this::loadNewest, dirs);
+		// resolving the directories is a VFS lookup, slow on the EDT, where this runs
+		ReadAction.nonBlocking(() -> roots().stream().map(ReviewFindingsService::reviewsDir).filter(Objects::nonNull)
+						.toArray(VirtualFile[]::new))
+				.finishOnUiThread(ModalityState.defaultModalityState(), dirs -> {
+					if (dirs.length == 0) {
+						loadNewest();
+						return;
+					}
+					// marked dirty, else the refresh trusts the watcher that missed the change
+					VfsUtil.markDirty(true, true, dirs);
+					RefreshQueue.getInstance().refresh(true, true, this::loadNewest, dirs);
+				})
+				.expireWith(this)
+				.submit(AppExecutorUtil.getAppExecutorService());
 	}
 
 	/**

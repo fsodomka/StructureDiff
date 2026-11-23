@@ -7,6 +7,7 @@ import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangesUtil;
 import com.intellij.openapi.vcs.changes.ui.ChangesTree;
 import com.intellij.openapi.vcs.changes.ui.VcsTreeModelData;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.vcs.log.CommitId;
 import com.intellij.vcs.log.VcsLogCommitSelection;
@@ -20,6 +21,7 @@ import javax.swing.JTree;
 import javax.swing.Timer;
 import java.beans.PropertyChangeListener;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -60,6 +62,8 @@ public final class CommitChangeSource implements ChangeSource, Disposable {
 	private volatile List<Change> changes = List.of();
 	/** Top selected commit; null when nothing is selected or the log is not open. */
 	private CommitId firstCommit;
+	/** The selected commits, newest first as the log lists them; empty when nothing is selected. */
+	private volatile List<CommitId> selectedCommits = List.of();
 	/**
 	 * Selected commit ids at the last update. Selection lists are mapped lazily from table rows; ids come from the
 	 * in-memory graph, commit hashes from the log storage, so only the first hash is resolved.
@@ -89,6 +93,21 @@ public final class CommitChangeSource implements ChangeSource, Disposable {
 	/** Top commit selected in the log; null when nothing is selected or the log is not open. */
 	public CommitId firstCommit() {
 		return firstCommit;
+	}
+
+	@Override
+	public boolean hasCommits() {
+		return true;
+	}
+
+	/** The selected commits, as {@code --no-walk} and their hashes per repository: not necessarily next to each other. */
+	@Override
+	public List<CommitRange> commitRanges() {
+		Map<VirtualFile, List<String>> byRoot = new LinkedHashMap<>();
+		for (CommitId commit : selectedCommits) {
+			byRoot.computeIfAbsent(commit.getRoot(), root -> new ArrayList<>(List.of("--no-walk"))).add(commit.getHash().asString());
+		}
+		return byRoot.entrySet().stream().map(entry -> new CommitRange(entry.getKey(), entry.getValue(), false)).toList();
 	}
 
 	/** Number of commits selected in the log. */
@@ -205,6 +224,7 @@ public final class CommitChangeSource implements ChangeSource, Disposable {
 		}
 		commitIds = ids;
 		firstCommit = ids.isEmpty() ? null : selection.getCommits().getFirst();
+		selectedCommits = ids.isEmpty() ? List.of() : List.copyOf(selection.getCommits());
 		changes = newChanges;
 		listeners.forEach(Runnable::run);
 	}

@@ -178,7 +178,9 @@ public class ReviewFindingsPanelTest extends BasePlatformTestCase {
 					new FileDiff(null, b.getPath(), null, FileStatus.MODIFIED, "old\n", text, 0, 0, null)));
 			waitForLoad();
 
-			assertEquals(List.of("a.java:2", "a.java:8", "b.java:5"), reasonPlaces());
+			// a refresh from disk and a second load follow the first one asynchronously, outside waitForLoad
+			PlatformTestUtil.waitWithEventsDispatching("the reasons' places were not listed", () -> reasonPlaces().size() == 3, 10);
+			assertEquals(List.of("a.java:2-3", "a.java:8-9", "b.java:5"), reasonPlaces());
 			// the section and the run count places (3), not records (5)
 			List<String> counted = new ArrayList<>();
 			for (int row = 0; row < tree.getRowCount(); row++) {

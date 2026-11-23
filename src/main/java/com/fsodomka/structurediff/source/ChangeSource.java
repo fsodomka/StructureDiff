@@ -3,6 +3,7 @@ package com.fsodomka.structurediff.source;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.changes.Change;
+import com.intellij.openapi.vfs.VirtualFile;
 
 import java.util.Collection;
 import java.util.List;
@@ -19,6 +20,28 @@ public interface ChangeSource {
 
 	/** Whether {@link #unversioned()} can return files. */
 	default boolean hasUnversioned() {
+		return false;
+	}
+
+	/**
+	 * The commits behind the changes of one repository, for the churn fill.
+	 *
+	 * @param logArgs     {@code git log} arguments that select the commits: a revision range, or {@code --no-walk} and hashes
+	 * @param workingCopy whether the shown changes include the working copy, so edits after the last commit count too
+	 */
+	record CommitRange(VirtualFile root, List<String> logArgs, boolean workingCopy) {
+	}
+
+	/**
+	 * The commit ranges the changes are made of, one per repository; empty when the changes are not commits (the
+	 * Uncommitted mode), where there is no churn to show. Called on a pooled thread.
+	 */
+	default List<CommitRange> commitRanges() {
+		return List.of();
+	}
+
+	/** Whether the changes are made of commits, so {@link #commitRanges()} can name them. */
+	default boolean hasCommits() {
 		return false;
 	}
 

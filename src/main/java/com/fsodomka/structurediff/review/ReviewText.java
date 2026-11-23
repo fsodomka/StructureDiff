@@ -4,6 +4,9 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.xml.util.XmlStringUtil;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 /** Tooltip, copy and status texts of a finding. */
 final class ReviewText {
 	private ReviewText() {
@@ -51,6 +54,44 @@ final class ReviewText {
 			text.append("\n\nFix: ").append(finding.fix());
 		}
 		return text.toString();
+	}
+
+	private static final int MIN_LEAD = 30;
+	private static final int MAX_LEAD = 160;
+	private static final int LONG_LEAD = 70;
+	private static final Pattern CLAUSE = Pattern.compile(",\\s+(?:and|but|so|which|while|because)\\s");
+
+	/**
+	 * The "why" of a finding title or edit reason for a tree row: its first line up to the first sentence end (". "), or to
+	 * the first ": " or "; " that leaves at least {@value #MIN_LEAD} characters (so "Fix: ..." is not cut). A lead still longer
+	 * than {@value #LONG_LEAD} stops at its first ", and" / ", but" / ", so" / ", which" / ", while" / ", because", and is
+	 * shortened with an ellipsis past {@value #MAX_LEAD}. The rest is for the detail pane.
+	 */
+	/** Whether the '.' at {@code dot} ends an abbreviation ("e.g.", "i.e.", "etc.", "vs."), not a sentence. */
+	private static boolean abbreviation(String line, int dot) {
+		String before = line.substring(0, dot).toLowerCase();
+		return before.endsWith("e.g") || before.endsWith("i.e") || before.endsWith(" etc") || before.endsWith(" vs");
+	}
+
+	static String lead(String text) {
+		int newline = text.indexOf('\n');
+		String line = (newline < 0 ? text : text.substring(0, newline)).strip();
+		int cut = line.length();
+		for (int i = 0; i < line.length(); i++) {
+			char c = line.charAt(i);
+			boolean end = i + 1 == line.length() || line.charAt(i + 1) == ' ';
+			if (end && (c == '.' && !abbreviation(line, i) || i >= MIN_LEAD && (c == ':' || c == ';'))) {
+				cut = i;
+				break;
+			}
+		}
+		if (cut > LONG_LEAD) {
+			Matcher clause = CLAUSE.matcher(line.substring(0, cut));
+			if (clause.find(MIN_LEAD)) {
+				cut = clause.start();
+			}
+		}
+		return StringUtil.shortenTextWithEllipsis(line.substring(0, cut).strip(), MAX_LEAD, 0);
 	}
 
 	/** Short form of {@link #statusNote} for the tool window. */

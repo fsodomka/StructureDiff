@@ -123,6 +123,27 @@ public class ViewOptionsTest extends BasePlatformTestCase {
 		}
 	}
 
+	public void testAFillThatDoesNotApplyGivesWayToTheOneTheHiddenPanelHad() {
+		ViewOptions panel = new ViewOptions();
+		try {
+			panel.setFill(ViewOptions.Fill.FILE_TYPE);
+			panel.rememberFill(fill -> true);
+			panel.setFill(ViewOptions.Fill.CHURN);
+			panel.restoreFill(fill -> fill != ViewOptions.Fill.CHURN);
+			assertEquals(ViewOptions.Fill.FILE_TYPE, panel.fill());
+
+			panel.restoreFill(fill -> fill != ViewOptions.Fill.FILE_TYPE);
+			assertEquals("the remembered fill does not apply either", ViewOptions.Fill.STATUS, panel.fill());
+
+			panel.setFill(ViewOptions.Fill.COVERAGE);
+			panel.restoreFill(fill -> true);
+			assertEquals("an applying fill stays", ViewOptions.Fill.COVERAGE, panel.fill());
+		}
+		finally {
+			panel.setFill(ViewOptions.Fill.STATUS);
+		}
+	}
+
 	private static final class NoChanges implements ChangeSource {
 		@Override
 		public Collection<Change> changes() {

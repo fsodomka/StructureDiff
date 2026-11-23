@@ -33,7 +33,10 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
   **File Type** (one hue per type, the
   most changed first); **Coverage** (with the bundled Coverage plugin: the share of each member's lines the selected
   *Run with Coverage* executed, orange for none to blue for all, hatched when the file was edited since; reopen a
-  closed run in **Run | Manage Coverage Reports**). The border and label keep the status color.
+  closed run in **Run | Manage Coverage Reports**); **Churn** (in Branch vs main and Follow Git Log: how often the
+  lines of each member were changed by the commits shown, plus the working copy in Branch vs main, following renames;
+  green for new code, orange for 2+ changes per line, computed in the background). The border and label keep the
+  status color.
 
 ## Show Usages
 
@@ -80,14 +83,15 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
   kind of change: green for added code, blue for modified and red for removed, like the tree and the treemap, grey when
   the kind isn't known. A click on the pencil, or on one of its bars, tints every changed range of the reason. It
   follows the code through later edits.
-- Reasons follow your edits while the IDE runs; ones recorded before it started are placed at their recorded lines and
-  marked "(approximate)".
+- Reasons are found again by their text when later edits moved their lines. They follow your edits while the IDE
+  runs; ones recorded before it started are placed at their recorded lines and marked "(approximate)".
 - The **Review** tool window lists them in an **Edit Reasons** section: one node per session or skill run
   with its time span, then each reason with its time and the places it covers (file and line), in the order the
   changes were made (a skill run in the order it wrote them). Only reasons on code the shown snapshot changes are
   listed, as in the gutter. Select one for its full text; double-click, Enter or Next / Previous Occurrence opens it
   with its range selected. A click on a pencil in the editor selects its place in the list. Grey places, like
   "(approximate)" in the gutter, may have drifted from their recorded lines.
+- Rows show a session's title and each reason's first clause; the rest is in the details pane.
 - Reloaded when an edits file changes, when the reviews directory changes in settings, and with the toolbar's
   **Refresh**, which also re-reads them from disk.
 

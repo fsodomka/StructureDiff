@@ -15,8 +15,8 @@ import java.util.function.Function;
 /**
  * The walkthrough order of edit reasons: grouped into runs by session, runs by their earliest reason. Within an agent
  * session by the time of each change, one tool call's ranges together in record order; within a skill run by record
- * order, which is the reading order the skill wrote (its times are all the same). Pending and fileless reasons are left
- * out. Pure: no platform calls.
+ * order, which is the reading order the skill wrote (its times are all the same). Fileless reasons are left out; pending
+ * ones are kept, as the tree shows them. Pure: no platform calls.
  */
 public final class EditReasonOrder {
 	/**
@@ -33,7 +33,7 @@ public final class EditReasonOrder {
 		Map<String, List<T>> bySession = new LinkedHashMap<>();
 		for (T item : items) {
 			EditReason reason = reasonOf.apply(item);
-			if (!reason.pending() && reason.file() != null) {
+			if (reason.file() != null) {
 				bySession.computeIfAbsent(Objects.requireNonNullElse(reason.session(), ""), key -> new ArrayList<>()).add(item);
 			}
 		}

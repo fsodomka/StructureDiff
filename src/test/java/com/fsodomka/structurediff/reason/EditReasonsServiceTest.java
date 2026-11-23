@@ -746,6 +746,38 @@ public class EditReasonsServiceTest extends BasePlatformTestCase {
 		assertEquals("  </a>", document.getText(a.marker().getTextRange()));
 	}
 
+	public void testALiveReasonWhoseLinesMovedBeforeItArrivedIsFoundByItsText() {
+		VirtualFile file = myFixture.addFileToProject("a.xml", TEXT).getVirtualFile();
+		// recorded at line 3, but the declaration is on line 1: an edit above moved it before the record was read
+		loadEdits(record(Instant.now(), "t1", "a.xml", 3, 3, "On the declaration.")
+				.replace("\"reason\"", "\"text\":\"<?xml version=\\\"1.0\\\"?>\",\"reason\""));
+
+		EditReasonsService.Anchored anchored = service.reasons().iterator().next();
+		assertFalse(anchored.approximate());
+		assertEquals(0, FileDocumentManager.getInstance().getDocument(file).getLineNumber(anchored.marker().getStartOffset()));
+	}
+
+	public void testAClippedTextOfALongChangeKeepsTheRecordedExtent() {
+		VirtualFile file = myFixture.addFileToProject("a.xml", TEXT).getVirtualFile();
+		// recorded at line 3 over 3 lines, with the first line's text only: the declaration, on line 1
+		loadEdits(record(Instant.now(), "t1", "a.xml", 3, 5, "A long change.")
+				.replace("\"reason\"", "\"text\":\"<?xml version=\\\"1.0\\\"?>\",\"reason\""));
+
+		RangeMarker marker = service.reasons().iterator().next().marker();
+		Document document = FileDocumentManager.getInstance().getDocument(file);
+		assertEquals(0, document.getLineNumber(marker.getStartOffset()));
+		assertEquals(2, document.getLineNumber(marker.getEndOffset()));
+	}
+
+	public void testALiveReasonWhoseTextIsNotFoundKeepsItsLinesApproximate() {
+		VirtualFile file = myFixture.addFileToProject("a.xml", TEXT).getVirtualFile();
+		loadEdits(record(Instant.now(), "t1", "a.xml", 5, 5, "On d.").replace("\"reason\"", "\"text\":\"<d/>\",\"reason\""));
+
+		EditReasonsService.Anchored anchored = service.reasons().iterator().next();
+		assertTrue(anchored.approximate());
+		assertEquals(4, FileDocumentManager.getInstance().getDocument(file).getLineNumber(anchored.marker().getStartOffset()));
+	}
+
 	public void testTheSmallPencilShowsTheWholeReason() {
 		myFixture.configureByText("a.xml", TEXT);
 		Editor editor = myFixture.getEditor();

@@ -78,6 +78,26 @@ public final class BranchChangeSource implements ChangeSource {
 		return changes;
 	}
 
+	@Override
+	public boolean hasCommits() {
+		return true;
+	}
+
+	/** The commits since the merge base of each repository, and the working copy on top, as {@link #changes()} shows them. */
+	@Override
+	public List<CommitRange> commitRanges() {
+		List<CommitRange> ranges = new ArrayList<>();
+		for (GitRepository repository : GitRepositoryManager.getInstance(project).getRepositories()) {
+			String mergeBase = mergeBase(repository);
+			// HEAD by its hash, so ranges differ once HEAD moved, e.g. by an amend that leaves the files' texts as they were
+			String head = repository.getCurrentRevision();
+			if (mergeBase != null && head != null) {
+				ranges.add(new CommitRange(repository.getRoot(), List.of(mergeBase + ".." + head), true));
+			}
+		}
+		return ranges;
+	}
+
 	/** Merge base of HEAD and the base branch; null without a base branch, commits or common history. */
 	private String mergeBase(GitRepository repository) {
 		VirtualFile root = repository.getRoot();

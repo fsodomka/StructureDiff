@@ -47,6 +47,10 @@ final class TreemapPanel extends JComponent {
 	/** The Coverage fill's ends: orange and blue, unlike the status red and green, and told apart without hue vision. */
 	private static final Color UNCOVERED = new JBColor(new Color(0xE0_6C_00), new Color(0xF0_8C_30));
 	private static final Color COVERED = new JBColor(new Color(0x1F_6F_D6), new Color(0x4C_95_F0));
+	/** The Churn fill's hot end: orange, as a member changed again and again; not the status red of deleted. New code is the status green. */
+	private static final Color HOT = new JBColor(new Color(0xE0_6C_00), new Color(0xF0_8C_30));
+	/** A churn of this many changes per line, and above, is fully hot. */
+	private static final double HOT_CHURN = 2.0;
 	/** The {@link ViewOptions.Fill#FILE_TYPE} hues, most changed type first; clear of the status green and red. */
 	private static final List<Color> TYPE_HUES = List.of(
 			new JBColor(new Color(0x3A_6E_C9), new Color(0x6A_9B_E8)),
@@ -82,6 +86,8 @@ final class TreemapPanel extends JComponent {
 	private final Supplier<ViewOptions.Fill> fill;
 	private final Function<DefaultMutableTreeNode, CoverageState.Counts> coverage;
 	private final Supplier<String> coverageLegend;
+	private final Function<DefaultMutableTreeNode, ChurnState.Churn> churn;
+	private final Supplier<String> churnLegend;
 	/** A message over the treemap, which takes no input meanwhile when it says so; null when none. */
 	private final Supplier<Overlay> overlay;
 
@@ -148,8 +154,11 @@ final class TreemapPanel extends JComponent {
 			Function<DefaultMutableTreeNode, ChangeFlashes.Flash> flash, Function<DefaultMutableTreeNode, Relation> related,
 			Supplier<Predicate<DefaultMutableTreeNode>> focus, BooleanSupplier loading, Supplier<String> emptyText,
 			Supplier<ViewOptions.Fill> fill, Function<DefaultMutableTreeNode, CoverageState.Counts> coverage,
-			Supplier<String> coverageLegend, Supplier<Overlay> overlay) {
+			Supplier<String> coverageLegend, Function<DefaultMutableTreeNode, ChurnState.Churn> churn, Supplier<String> churnLegend,
+			Supplier<Overlay> overlay) {
 		this.tree = tree;
+		this.churn = churn;
+		this.churnLegend = churnLegend;
 		this.related = related;
 		this.focus = focus;
 		this.testFile = testFile;
@@ -389,6 +398,13 @@ final class TreemapPanel extends JComponent {
 				FileDiff file = DiffTreeNodes.fileOf(node);
 				return file == null ? null : TreemapLayout.fileTypeName(file);
 			}
+			case CHURN -> {
+				ChurnState.Churn changes = churn.apply(node);
+				if (changes == null) {
+					return "no churn data";
+				}
+				return String.format("%.2f changes per line", changes.value()) + (changes.created() ? ", new code" : "");
+			}
 			case COVERAGE -> {
 				CoverageState.Counts counts = coverage.apply(node);
 				if (counts == null) {
@@ -625,6 +641,8 @@ final class TreemapPanel extends JComponent {
 		}
 		// the status still shows in the border and label
 		Color fillColor = color;
+		// churn's heat is already the box's final color: the leaf tint would dim the orange to brown
+		boolean exactFill = false;
 		if (fill.get() == ViewOptions.Fill.FILE_TYPE) {
 			fillColor = typeColor(node);
 		}
@@ -634,10 +652,17 @@ final class TreemapPanel extends JComponent {
 			// for it; opaque, as unfilled it would show its container's tint
 			fillColor = counts == null ? null : coverageColor(2 * counts.share() - 1);
 		}
+		else if (fill.get() == ViewOptions.Fill.CHURN) {
+			ChurnState.Churn changes = churn.apply(node);
+			// the plain background without a value; new code in green until something changes it again
+			fillColor = changes == null ? null : changes.created() && changes.value() == 0 ? statusColor(FileStatus.ADDED)
+					: changes.value() == 0 ? null : churnColor(changes.value());
+			exactFill = changes != null && changes.value() > 0;
+		}
 		// opaque, the tint premixed with the background: a translucent fill would add up with its container's, so the same
 		// value would look different inside a tinted container than inside a plain one
 		g.setColor(fillColor == null ? UIUtil.getTreeBackground()
-				: node.isLeaf() ? leafTint(fillColor) : ColorUtil.mix(UIUtil.getTreeBackground(), fillColor, 0.12));
+				: node.isLeaf() ? exactFill ? fillColor : leafTint(fillColor) : ColorUtil.mix(UIUtil.getTreeBackground(), fillColor, 0.12));
 		g.fillRect(r.x, r.y, r.width, r.height);
 		// over the status tint, as the tree's row background: blended, the blue of a modified box turns the amber gray. The
 		// border and label keep the status color. Only the header of a container showing its children, like the flash
@@ -755,6 +780,11 @@ final class TreemapPanel extends JComponent {
 		return ColorUtil.mix(UIUtil.getTreeBackground(), end, 0.25 + 0.75 * Math.abs(score));
 	}
 
+	/** The background mixed toward orange by {@code value} changes per line: from a third, so a little churn still shows, to nine tenths. */
+	private static Color churnColor(double value) {
+		return ColorUtil.mix(UIUtil.getTreeBackground(), HOT, 0.3 + 0.6 * Math.min(1, value / HOT_CHURN));
+	}
+
 	/** The hue of the type of {@code node}'s file; gray above the files, e.g. for a repository. */
 	private Color typeColor(DefaultMutableTreeNode node) {
 		FileDiff file = DiffTreeNodes.fileOf(node);
@@ -776,8 +806,11 @@ final class TreemapPanel extends JComponent {
 		else if (fill.get() == ViewOptions.Fill.FILE_TYPE) {
 			paintTypeLegend(g, y, pad);
 		}
+		else if (fill.get() == ViewOptions.Fill.CHURN) {
+			paintScaleLegend(g, y, pad, "0", "2+", churnLegend.get(), score -> churnColor(HOT_CHURN * (score + 1) / 2), true);
+		}
 		else if (fill.get() == ViewOptions.Fill.COVERAGE) {
-			paintScaleLegend(g, y, pad, "0 %", "100 %", coverageLegend.get(), TreemapPanel::coverageColor);
+			paintScaleLegend(g, y, pad, "0 %", "100 %", coverageLegend.get(), TreemapPanel::coverageColor, false);
 		}
 		return height;
 	}
@@ -933,9 +966,12 @@ final class TreemapPanel extends JComponent {
 		g.setClip(clip);
 	}
 
-	/** {@code left}, a bar of {@code scale} from -1 to +1, {@code right}, then {@code note} when not null. */
+	/**
+	 * {@code left}, a bar of {@code scale} from -1 to +1, {@code right}, then {@code note} when not null; the bar shows the
+	 * boxes' leaf tint of the scale, or the scale itself when {@code exact}, as the boxes do.
+	 */
 	private void paintScaleLegend(Graphics2D g, int y, int pad, String left, String right, @Nullable String note,
-								  DoubleFunction<Color> scale) {
+								  DoubleFunction<Color> scale, boolean exact) {
 		FontMetrics metrics = g.getFontMetrics();
 		int barWidth = JBUI.scale(120);
 		int total = metrics.stringWidth(left) + barWidth + metrics.stringWidth(right) + 4 * pad
@@ -947,7 +983,8 @@ final class TreemapPanel extends JComponent {
 		x += metrics.stringWidth(left) + 2 * pad;
 		int barY = y + pad + (metrics.getHeight() - JBUI.scale(8)) / 2;
 		for (int i = 0; i < barWidth; i++) {
-			g.setColor(leafTint(scale.apply(2.0 * i / (barWidth - 1) - 1)));
+			Color step = scale.apply(2.0 * i / (barWidth - 1) - 1);
+			g.setColor(exact ? step : leafTint(step));
 			g.fillRect(x + i, barY, 1, JBUI.scale(8));
 		}
 		x += barWidth + 2 * pad;

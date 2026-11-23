@@ -155,8 +155,8 @@ public final class EditReasonsService implements Disposable {
 			openBefore(marker);
 			return;
 		}
-		Editor editor = FileEditorManager.getInstance(project)
-				.openTextEditor(new OpenFileDescriptor(project, file, marker.getStartOffset()), true);
+		new OpenFileDescriptor(project, file, marker.getStartOffset()).navigate(true);
+		Editor editor = FileEditorManager.getInstance(project).getSelectedTextEditor();
 		if (editor == null || editor.getDocument() != marker.getDocument() || kind == null) {
 			return;
 		}
@@ -477,10 +477,12 @@ public final class EditReasonsService implements Disposable {
 	}
 
 	/**
-	 * Where a record goes in {@code document}. One from before the service started may have drifted: when it carries its
-	 * lines' text, the text found nearest to the recorded lines places it exactly, and none found (the code changed again or
-	 * is gone) drops it ({@link #GONE}). A drop is remembered with the document's stamp, so later loads, one per agent edit,
-	 * don't search an unchanged document again.
+	 * Where a record goes in {@code document}. Its lines may have drifted: one from before the service started, or a live
+	 * one whose document changed again before it arrived (the next call of a parallel batch, an import added above). When
+	 * it carries its lines' text and the lines don't hold it, the text found nearest to the recorded lines places it
+	 * exactly. None found (the code changed again or is gone) drops an older record ({@link #GONE}); a live one keeps its
+	 * recorded lines, marked approximate. A miss is remembered with the document's stamp, so later loads, one per agent
+	 * edit, don't search an unchanged document again.
 	 */
 	private Lines lines(String key, EditReason reason, Document document) {
 		boolean approximate = reason.time().isBefore(started);
@@ -491,23 +493,32 @@ public final class EditReasonsService implements Disposable {
 		int last = document.getLineCount() - 1;
 		int startLine = Math.min(reason.start() - 1, last);
 		int endLine = Math.min(Math.max(reason.end() - 1, startLine), last);
-		if (!approximate || reason.text() == null || reason.text().isBlank()) {
+		if (reason.text() == null || reason.text().isBlank()) {
 			return new Lines(startLine, endLine, approximate);
+		}
+		List<String> wanted = reason.text().lines().map(String::strip).toList();
+		// a record's lines are those of the file right after its edit; a later edit (the next call of a parallel batch,
+		// an import added above) may have moved them before the record arrived, so even a live one is checked
+		if (!approximate && startLine + wanted.size() <= document.getLineCount() && matches(document, wanted, startLine)) {
+			return new Lines(startLine, endLine, false);
 		}
 		long stamp = document.getModificationStamp();
 		Long goneAt = gone.get(key);
 		if (goneAt != null && goneAt == stamp) {
-			return GONE;
+			return approximate ? GONE : new Lines(startLine, endLine, true);
 		}
-		List<String> wanted = reason.text().lines().map(String::strip).toList();
 		int found = findLines(document, wanted, startLine);
 		if (found < 0) {
 			gone.put(key, stamp);
-			return GONE;
+			// an older record whose text is gone is dropped; a live one may only be ahead of its document (a file the
+			// agent wrote on disk, not yet reloaded): it keeps its lines, marked as they may be wrong
+			return approximate ? GONE : new Lines(startLine, endLine, true);
 		}
 		gone.remove(key);
 		boolean distinctive = String.join("", wanted).replaceAll("\\s", "").length() >= MIN_EXACT_TEXT;
-		return new Lines(found, found + Math.max(wanted.size(), 1) - 1, !distinctive);
+		// a long change's text is only its first lines (the mod clips it): its extent is the record's
+		int span = Math.max(wanted.size(), reason.end() - reason.start() + 1);
+		return new Lines(found, found + Math.max(span, 1) - 1, !distinctive);
 	}
 
 	private static String key(VirtualFile root, EditReason reason) {

@@ -62,6 +62,19 @@ public class EditReasonTest extends TestCase {
 		assertEquals("a\nb", reason.text());
 	}
 
+	public void testTheLastTitleOfTheFileNamesEveryReason() {
+		String text = record("t1", "\"A.java\"", "[3,5]", "null", "pending").replace("\"tool\"", "\"title\":\"First\",\"tool\"") + "\n"
+				+ record("t2", "\"B.java\"", "[1,1]", "\"r\"", "agent").replace("\"tool\"", "\"title\":\"Fix the gutter\",\"tool\"") + "\n"
+				+ record("t3", "\"C.java\"", "[1,1]", "\"r\"", "agent");
+
+		assertEquals(List.of("Fix the gutter", "Fix the gutter", "Fix the gutter"),
+				EditReason.read(text).stream().map(EditReason::title).toList());
+	}
+
+	public void testAFileWithoutATitleHasNone() {
+		assertNull(EditReason.read(record("t1", "\"A.java\"", "[3,5]", "\"r\"", "agent")).getFirst().title());
+	}
+
 	public void testOneCallWithSeveralRangesKeepsEach() {
 		String text = record("t1", "\"A.java\"", "[3,5]", "\"r\"", "agent") + "\n"
 				+ record("t1", "\"A.java\"", "[9,9]", "\"r\"", "agent");

@@ -90,7 +90,6 @@ import java.util.stream.Collectors;
  * steps through findings and reasons alike.
  */
 final class ReviewFindingsPanel extends SimpleToolWindowPanel implements Disposable, OccurenceNavigator {
-	private static final int MAX_TITLE_LENGTH = 160;
 
 	/** A top node: the shown findings or the dismissed ones; {@code severities} counts them per severity. */
 	private record Section(String title, int count, String severities) {
@@ -101,9 +100,11 @@ final class ReviewFindingsPanel extends SimpleToolWindowPanel implements Disposa
 	}
 
 	private static final String REASONS_TITLE = "Edit Reasons";
+	private static final String PENDING_TEXT = "reason pending";
 
 	/** A run of edit reasons: an agent session or a skill run; {@code session} is null for records that name none. */
-	private record ReasonRun(@Nullable String session, boolean skill, Instant earliest, Instant latest, int count) {
+	private record ReasonRun(@Nullable String session, @Nullable String title, boolean skill, Instant earliest, Instant latest,
+							 int count) {
 		/** From the earliest listed reason to the latest; the end without its day when on the same day, one time when equal. */
 		String when() {
 			String start = EditReason.when(earliest);
@@ -138,12 +139,6 @@ final class ReviewFindingsPanel extends SimpleToolWindowPanel implements Disposa
 		/** Identifies the reason across rebuilds. */
 		String key() {
 			return anchored.key();
-		}
-
-		/** The marker's current first line, 1-based; 0 once it became invalid. */
-		int line() {
-			RangeMarker marker = marker();
-			return marker.isValid() ? MarkerLines.of(document(), marker).first() + 1 : 0;
 		}
 
 		/** The marker's document: resolving it reads the file's document, which needs read access, also on the EDT (2025.2+). */
@@ -204,11 +199,13 @@ final class ReviewFindingsPanel extends SimpleToolWindowPanel implements Disposa
 				chooseReview(e);
 			}
 		});
-		group.add(new DumbAwareAction("Reload", "Load the newest review of each repository again, also cleared ones",
+		group.add(new DumbAwareAction("Reload", "Load the newest review of each repository again, also cleared ones, and the edit reasons",
 				AllIcons.Actions.Refresh) {
 			@Override
 			public void actionPerformed(@NotNull AnActionEvent e) {
 				ReviewFindingsService.getInstance(project).reload();
+				// also re-reads the edit reasons from disk, which the agent writes outside the IDE
+				EditReasonsService.getInstance(project).refreshAndLoad();
 			}
 		});
 		group.add(dismiss);
@@ -382,7 +379,7 @@ final class ReviewFindingsPanel extends SimpleToolWindowPanel implements Disposa
 
 	/**
 	 * The Edit Reasons section: the listed reasons by run, in walkthrough order; null when edit reasons are off or none
-	 * is listed. A reason is listed when it has a reason, a file and a valid marker.
+	 * is listed. A reason is listed when it has a file and a valid marker; one still pending shows as "reason pending".
 	 */
 	private static @Nullable DefaultMutableTreeNode reasonsSection(Project project) {
 		if (!EditReasonsService.isEnabled()) {
@@ -403,8 +400,7 @@ final class ReviewFindingsPanel extends SimpleToolWindowPanel implements Disposa
 		for (EditReasonOrder.Run<EditReasonsService.Anchored> run : runs) {
 			// a group at its earliest place: the items are in walkthrough order, so the first seen
 			Map<String, List<EditReasonsService.Anchored>> byText = new LinkedHashMap<>();
-			run.items().forEach(reason -> byText.computeIfAbsent(Objects.requireNonNull(reason.reason().reason()),
-					key -> new ArrayList<>()).add(reason));
+			run.items().forEach(reason -> byText.computeIfAbsent(text(reason.reason()), key -> new ArrayList<>()).add(reason));
 			DefaultMutableTreeNode runNode = new DefaultMutableTreeNode();
 			int places = 0;
 			for (Map.Entry<String, List<EditReasonsService.Anchored>> entry : byText.entrySet()) {
@@ -414,7 +410,7 @@ final class ReviewFindingsPanel extends SimpleToolWindowPanel implements Disposa
 				runNode.add(groupNode);
 				places += nodes.size();
 			}
-			runNode.setUserObject(new ReasonRun(run.session(), run.skill(), run.earliest(),
+			runNode.setUserObject(new ReasonRun(run.session(), sessionTitle(run.items().getFirst().reason()), run.skill(), run.earliest(),
 					run.items().stream().map(item -> item.reason().time()).max(Comparator.naturalOrder()).orElseThrow(), places));
 			section.add(runNode);
 			count += places;
@@ -441,19 +437,41 @@ final class ReviewFindingsPanel extends SimpleToolWindowPanel implements Disposa
 		});
 	}
 
-	/** An agent session by the first 8 characters of its id; a skill run by its whole name. */
+	/** An agent session by its title and the first 8 characters of its id, the id alone without a title; a skill run by its whole name. */
 	private static String runLabel(ReasonRun run) {
+		String title = runTitle(run);
+		return title == null ? runId(run) : title + " · " + runId(run);
+	}
+
+	/** The run's shortened session title; null for a skill run and for a session without one. */
+	private static @Nullable String runTitle(ReasonRun run) {
+		return run.title() == null || run.skill() ? null : StringUtil.shortenTextWithEllipsis(run.title(), 60, 0);
+	}
+
+	private static String runId(ReasonRun run) {
 		String session = Objects.requireNonNullElse(run.session(), "no session");
 		return run.skill() || session.length() <= 8 ? session : session.substring(0, 8);
 	}
 
-	/** File name and the marker's current line. */
+	/** The title of the session a reason belongs to; null for a skill run, which is named by its run. */
+	private static @Nullable String sessionTitle(EditReason reason) {
+		return reason.skill() ? null : reason.title();
+	}
+
+	/** File name and the marker's current lines, {@code :32} or {@code :32-35}; the name alone once the marker became invalid. */
 	private static String reasonLocation(ReasonNode reason) {
-		return Objects.requireNonNull(reason.anchored().file()).getName() + ":" + reason.line();
+		RangeMarker marker = reason.marker();
+		return Objects.requireNonNull(reason.anchored().file()).getName()
+				+ (marker.isValid() ? MarkerLines.of(reason.document(), marker).suffix() : "");
 	}
 
 	private static String reasonText(ReasonNode reason) {
-		return Objects.requireNonNull(reason.anchored().reason().reason());
+		return text(reason.anchored().reason());
+	}
+
+	/** The reason's text; "reason pending" while the agent has not given one, as the tree and the gutter say. */
+	private static String text(EditReason reason) {
+		return reason.pending() ? PENDING_TEXT : Objects.requireNonNull(reason.reason());
 	}
 
 	private static String firstLine(String text) {
@@ -533,24 +551,26 @@ final class ReviewFindingsPanel extends SimpleToolWindowPanel implements Disposa
 		details.setCaretPosition(0);
 	}
 
-	/** The reason in full, then each place with its tool, time, lines and source, then the session. */
+	/**
+	 * The reason in full, then its session: "Agent session" and its title, with the whole id below; "Skill run" and its name
+	 * (its id) for a skill. The places are the tree's leaves.
+	 */
 	private static String reasonDetails(String text, List<ReasonNode> places) {
+		EditReason first = places.getFirst().anchored().reason();
+		String session = StringUtil.escapeXmlEntities(Objects.requireNonNullElse(first.session(), ""));
+		String title = sessionTitle(first);
 		StringBuilder html = new StringBuilder("<html><body><p>")
 				.append(StringUtil.escapeXmlEntities(text).replace("\n", "<br>")).append("</p><br><p style='color:gray'>");
-		for (ReasonNode node : places) {
-			EditReason reason = node.anchored().reason();
-			RangeMarker marker = node.marker();
-			String lines = "";
-			if (marker.isValid()) {
-				lines = MarkerLines.of(node.document(), marker).suffix();
+		if (first.skill()) {
+			html.append("Skill run  ").append(session);
+		} else {
+			html.append("Agent session");
+			if (title != null) {
+				html.append("  ").append(StringUtil.escapeXmlEntities(title));
 			}
-			html.append(StringUtil.escapeXmlEntities(reason.tool())).append(" · ").append(EditReason.when(reason.time()))
-					.append(" · ").append(StringUtil.escapeXmlEntities(reason.file() + lines)).append(" · ")
-					.append(reason.skill() ? "skill" : "agent").append(node.anchored().approximate() ? " · approximate place" : "")
-					.append("<br>");
+			html.append("<br>").append(session);
 		}
-		String session = places.getFirst().anchored().reason().session();
-		return html.append(StringUtil.escapeXmlEntities(Objects.requireNonNullElse(session, ""))).append("</p></body></html>").toString();
+		return html.append("</p></body></html>").toString();
 	}
 
 	/** A review file in the Open Review popup; {@link #OPEN_FILE} chooses one from elsewhere. */
@@ -865,7 +885,7 @@ final class ReviewFindingsPanel extends SimpleToolWindowPanel implements Disposa
 				boolean shown = placement.highlighter() != null;
 				setIcon(finding.severity().icon);
 				append(finding.ruleId(), shown ? SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES : SimpleTextAttributes.GRAYED_BOLD_ATTRIBUTES);
-				append("  " + StringUtil.shortenTextWithEllipsis(finding.title(), MAX_TITLE_LENGTH, 0),
+				append("  " + ReviewText.lead(finding.title()),
 						shown ? SimpleTextAttributes.REGULAR_ATTRIBUTES : SimpleTextAttributes.GRAYED_ATTRIBUTES);
 				if (placement.line() > 0) {
 					append("  :" + placement.line(), SimpleTextAttributes.GRAYED_ATTRIBUTES);
@@ -877,12 +897,18 @@ final class ReviewFindingsPanel extends SimpleToolWindowPanel implements Disposa
 			} else if (node instanceof ReasonRun run) {
 				setIcon(pencil(run.skill()));
 				append(run.when(), SimpleTextAttributes.GRAYED_ATTRIBUTES);
-				append("  " + runLabel(run));
+				String title = runTitle(run);
+				if (title == null) {
+					append("  " + runId(run), SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
+				} else {
+					append("  " + title, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES);
+					append(" · " + runId(run), SimpleTextAttributes.GRAYED_ATTRIBUTES);
+				}
 				append("  " + run.count(), SimpleTextAttributes.GRAYED_ATTRIBUTES);
 				setToolTipText(run.session());
 			} else if (node instanceof ReasonGroup group) {
 				append(EditReason.when(group.earliest()), SimpleTextAttributes.GRAYED_ATTRIBUTES);
-				append("  " + StringUtil.shortenTextWithEllipsis(firstLine(group.text()), MAX_TITLE_LENGTH, 0));
+				append("  " + ReviewText.lead(group.text()));
 				append("  " + group.places().size(), SimpleTextAttributes.GRAYED_ATTRIBUTES);
 			} else if (node instanceof ReasonNode reason) {
 				setIcon(fileIcon(reason.anchored().file()));

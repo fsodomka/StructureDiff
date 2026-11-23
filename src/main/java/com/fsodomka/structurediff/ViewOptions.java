@@ -54,6 +54,7 @@ final class ViewOptions {
 	/** What colors the treemap's boxes. */
 	enum Fill {
 		STATUS("Status", "Color by change status"),
+		CHURN("Churn", "Color by how often the lines were changed by the commits shown: orange often, green new code"),
 		FILE_TYPE("File Type", "Color by file type, the most changed first"),
 		COVERAGE("Coverage", "Color by the share of lines the selected Run with Coverage executed: orange none, blue all");
 
@@ -72,6 +73,8 @@ final class ViewOptions {
 	 * with {@link Fill#STATUS}. Read and written on the EDT.
 	 */
 	private static Fill fill = Fill.STATUS;
+	/** This panel's fill when it was last hidden, for {@link #restoreFill}. EDT only. */
+	private Fill lastFill = Fill.STATUS;
 	/** Every panel's reaction to a change of {@link #fill}, as each one may show a treemap at the time. EDT only. */
 	private static final List<Runnable> fillListeners = new ArrayList<>();
 
@@ -92,6 +95,23 @@ final class ViewOptions {
 		}
 		fill = value;
 		List.copyOf(fillListeners).forEach(Runnable::run);
+	}
+
+	/** Notes the shared fill as this panel's own when it {@code applies} here; call when the panel is hidden. EDT only. */
+	void rememberFill(Predicate<Fill> applies) {
+		if (applies.test(fill)) {
+			lastFill = fill;
+		}
+	}
+
+	/**
+	 * Replaces the shared fill, when it does not {@code apply} here, with the one {@link #rememberFill} noted, or with
+	 * {@link Fill#STATUS} if that does not apply either. Call when the panel shows. EDT only.
+	 */
+	void restoreFill(Predicate<Fill> applies) {
+		if (!applies.test(fill)) {
+			setFill(applies.test(lastFill) ? lastFill : Fill.STATUS);
+		}
 	}
 
 	/** Runs {@code changed} on the EDT whenever any panel changes the fill, until {@code parent} is disposed. */

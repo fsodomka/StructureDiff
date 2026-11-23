@@ -42,8 +42,10 @@
         <b>Status</b>;
         <b>File Type</b> (one hue per type, the most changed first); <b>Coverage</b> (with the bundled Coverage plugin:
         the share of each member's lines the selected <i>Run with Coverage</i> executed, orange for none to blue for
-        all, hatched when the file was edited since; reopen a closed run in <b>Run | Manage Coverage Reports</b>). The
-        border and label keep the status color.</li>
+        all, hatched when the file was edited since; reopen a closed run in <b>Run | Manage Coverage Reports</b>);
+        <b>Churn</b> (in Branch vs main and Follow Git Log: how often the lines of each member were changed by the
+        commits shown, plus the working copy in Branch vs main, following renames; green for new code, orange for 2+
+        changes per line, computed in the background). The border and label keep the status color.</li>
     </ul>
 
     <h3>Show Usages</h3>
@@ -97,7 +99,8 @@
         shown changes include. Double-click, Enter or Next / Previous Occurrence opens a place with its range selected,
         and a click on a gutter pencil selects its place in the list.</li>
       <li>Reasons follow your edits while the IDE runs; ones recorded before it started are marked "(approximate)".
-        <b>Refresh</b> re-reads them from disk.</li>
+        They are found again by their text when later edits moved their lines. <b>Refresh</b> re-reads them from disk.</li>
+      <li>Rows show a session's title and each reason's first clause; the rest is in the details pane.</li>
     </ul>
     ]]></description>
 
