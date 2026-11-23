@@ -14,8 +14,8 @@
 
     <h3>Structure Diff tool window</h3>
     <ul>
-      <li><b>Modes</b>: <b>Uncommitted</b> changes; <b>Branch vs main</b> &ndash; everything the branch changed since
-        it forked from <code>main</code>/<code>master</code>, like a merge request (needs Git); <b>Follow Git Log</b>
+      <li><b>Modes</b>: <b>Uncommitted</b> changes; <b>Branch vs base</b> &ndash; everything the branch changed since
+        it forked from <code>main</code>/<code>master</code> or a base you pick under <b>Base Branch&hellip;</b>, like a merge request (needs Git); <b>Follow Git Log</b>
         &ndash; the commits selected in the Git log.</li>
       <li><b>Export Diff for Review</b> &ndash; saves the changes to <code>reviews/&lt;timestamp&gt;-changes.diff</code>
         and copies a review skill command to paste into your AI agent. With changes in several repositories, the selected
@@ -43,8 +43,8 @@
         <b>File Type</b> (one hue per type, the most changed first); <b>Coverage</b> (with the bundled Coverage plugin:
         the share of each member's lines the selected <i>Run with Coverage</i> executed, orange for none to blue for
         all, hatched when the file was edited since; reopen a closed run in <b>Run | Manage Coverage Reports</b>);
-        <b>Churn</b> (in Branch vs main and Follow Git Log: how often the lines of each member were changed by the
-        commits shown, plus the working copy in Branch vs main, following renames; green for new code, orange for 2+
+        <b>Churn</b> (in Branch vs base and Follow Git Log: how often the lines of each member were changed by the
+        commits shown, plus the working copy in Branch vs base, following renames; green for new code, orange for 2+
         changes per line, computed in the background). The border and label keep the status color.</li>
     </ul>
 
@@ -107,7 +107,7 @@
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.lang</depends>
     <depends>com.intellij.modules.vcs</depends>
-    <!-- only the Branch vs main mode (BranchChangeSource) needs Git; without it the mode is not offered -->
+    <!-- only the Branch vs base mode (BranchChangeSource) needs Git; without it the mode is not offered -->
     <depends optional="true" config-file="structurediff-git.xml">Git4Idea</depends>
     <depends optional="true" config-file="structurediff-coverage.xml">Coverage</depends>
 

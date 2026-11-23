@@ -9,8 +9,8 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
 
 ## Structure Diff tool window
 
-- **Modes**: **Uncommitted** changes; **Branch vs main** — everything the branch changed since it forked from
-  `main`/`master`, like a merge request (needs Git); **Follow Git Log** — the commits selected in the Git log.
+- **Modes**: **Uncommitted** changes; **Branch vs base** — everything the branch changed since it forked from
+  `main`/`master` or a base you pick under **Base Branch…**, like a merge request (needs Git); **Follow Git Log** — the commits selected in the Git log.
 - **Export Diff for Review** — saves the changes to `reviews/<timestamp>-changes.diff` and copies the
   review skill command for it to paste into your agent. Changes in several repositories: the selected repository is
   exported on its own, otherwise each repository gets a `<timestamp>-<repo>-changes.diff` and the command lists them
@@ -35,8 +35,8 @@ Works for every language with a Structure view (Java, Kotlin, TypeScript, JavaSc
   **File Type** (one hue per type, the
   most changed first); **Coverage** (with the bundled Coverage plugin: the share of each member's lines the selected
   *Run with Coverage* executed, orange for none to blue for all, hatched when the file was edited since; reopen a
-  closed run in **Run | Manage Coverage Reports**); **Churn** (in Branch vs main and Follow Git Log: how often the
-  lines of each member were changed by the commits shown, plus the working copy in Branch vs main, following renames;
+  closed run in **Run | Manage Coverage Reports**); **Churn** (in Branch vs base and Follow Git Log: how often the
+  lines of each member were changed by the commits shown, plus the working copy in Branch vs base, following renames;
   green for new code, orange for 2+ changes per line, computed in the background). The border and label keep the
   status color.
 

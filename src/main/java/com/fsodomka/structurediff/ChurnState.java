@@ -43,7 +43,7 @@ import java.util.function.Supplier;
 
 /**
  * How often the lines of each shown member were changed by the commits behind the changes (and the working copy on top
- * of them in Branch vs main), for the treemap's {@link ViewOptions.Fill#CHURN} fill; see
+ * of them in Branch vs base), for the treemap's {@link ViewOptions.Fill#CHURN} fill; see
  * {@code docs/specs/2026-11-20-treemap-churn-heat-design.md}. Computed only while that fill is chosen, and only for
  * sources made of commits.
  */
@@ -375,7 +375,7 @@ final class ChurnState {
 			return null;
 		}
 		if (!available()) {
-			return new TreemapPanel.Overlay("Churn needs commits\nChoose Branch vs main, or follow commits in the Git log", false, false);
+			return new TreemapPanel.Overlay("Churn needs commits\nChoose Branch vs base, or follow commits in the Git log", false, false);
 		}
 		if (computing) {
 			return DumbService.isDumb(project) ? new TreemapPanel.Overlay("Waiting for indexing…", true, false)

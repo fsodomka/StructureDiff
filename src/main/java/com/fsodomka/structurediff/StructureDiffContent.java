@@ -14,12 +14,15 @@ import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.actionSystem.KeepPopupOnPerform;
 import com.intellij.openapi.actionSystem.ex.ComboBoxAction;
+import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.project.DumbAware;
+import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.DumbAwareToggleAction;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.content.Content;
 import com.intellij.vcs.log.CommitId;
@@ -36,12 +39,14 @@ import java.awt.BorderLayout;
  */
 final class StructureDiffContent extends JPanel implements Disposable {
 	private static final String MODE_KEY = "structureDiff.mode";
+	private static final String BASE_KEY = "structureDiff.baseBranch";
 	private static final PluginId GIT_PLUGIN = PluginId.getId("Git4Idea");
+	private static final String DEFAULT_BASE = "Default (" + BranchChangeSource.DEFAULT_BASES + ")";
 	private static final Icon FOLLOWING_ICON = ExecutionUtil.getLiveIndicator(AllIcons.Vcs.History);
 
 	enum Mode {
 		UNCOMMITTED("Uncommitted", "Uncommitted changes and unversioned files", AllIcons.Vcs.Changelist),
-		BRANCH("Branch vs main", "Changes since the branch forked from origin/main, main, origin/master or master, plus uncommitted changes",
+		BRANCH("Branch vs base", "Changes since the branch forked from the base (default origin/main or main), plus uncommitted changes",
 				AllIcons.Vcs.Branch),
 		GIT_LOG("Follow Git Log", "The commits selected in the Git log", FOLLOWING_ICON);
 
@@ -87,7 +92,7 @@ final class StructureDiffContent extends JPanel implements Disposable {
 	}
 
 	/**
-	 * Branch vs main needs the optional Git plugin: without it, {@link BranchChangeSource} cannot load, so it is only
+	 * Branch vs base needs the optional Git plugin: without it, {@link BranchChangeSource} cannot load, so it is only
 	 * created after this check.
 	 */
 	private static boolean isAvailable(Mode mode) {
@@ -98,6 +103,39 @@ final class StructureDiffContent extends JPanel implements Disposable {
 		if (newMode == mode) {
 			return;
 		}
+		showMode(newMode);
+	}
+
+	/** The base chosen for the Branch mode in this project; null for the default. */
+	private String chosenBase() {
+		return PropertiesComponent.getInstance(project).getValue(BASE_KEY);
+	}
+
+	private void chooseBase() {
+		BranchChangeSource.BranchNames names = BranchChangeSource.branchNames(project);
+		DefaultActionGroup group = new DefaultActionGroup();
+		String chosen = chosenBase();
+		group.add(baseAction(DEFAULT_BASE, null, chosen == null));
+		group.addSeparator("Local");
+		names.local().forEach(name -> group.add(baseAction(name, name, name.equals(chosen))));
+		group.addSeparator("Remote");
+		names.remote().forEach(name -> group.add(baseAction(name, name, name.equals(chosen))));
+		JBPopupFactory.getInstance().createActionGroupPopup("Base Branch", group, SimpleDataContext.getProjectContext(project),
+				JBPopupFactory.ActionSelectionAid.SPEEDSEARCH, false).showCenteredInCurrentWindow(project);
+	}
+
+	/** Chooses {@code base} (null for the default). The source reads its base once, so a new one is made. */
+	private DumbAwareAction baseAction(String text, String base, boolean current) {
+		return new DumbAwareAction(text, null, current ? AllIcons.Actions.Checked : null) {
+			@Override
+			public void actionPerformed(@NotNull AnActionEvent e) {
+				PropertiesComponent.getInstance(project).setValue(BASE_KEY, base);
+				showMode(Mode.BRANCH);
+			}
+		};
+	}
+
+	private void showMode(Mode newMode) {
 		mode = newMode;
 		PropertiesComponent.getInstance().setValue(MODE_KEY, newMode.name());
 		if (modeDisposable != null) {
@@ -109,7 +147,7 @@ final class StructureDiffContent extends JPanel implements Disposable {
 		}
 		if (newMode == Mode.BRANCH) {
 			modeDisposable = Disposer.newDisposable(this, "Structure Diff branch mode");
-			branchSource = new BranchChangeSource(project);
+			branchSource = new BranchChangeSource(project, chosenBase());
 			modePanel = new StructureDiffPanel(project, branchSource, modeAction);
 			Disposer.register(modeDisposable, modePanel);
 			// repository changes come on a pooled thread; they can change the base in the title
@@ -193,6 +231,20 @@ final class StructureDiffContent extends JPanel implements Disposable {
 					@Override
 					public @NotNull ActionUpdateThread getActionUpdateThread() {
 						return ActionUpdateThread.EDT;
+					}
+				});
+			}
+			if (isAvailable(Mode.BRANCH)) {
+				group.addSeparator();
+				group.add(new DumbAwareAction("Base Branch…", "Choose the branch the Branch mode compares with", AllIcons.Vcs.Branch) {
+					@Override
+					public void actionPerformed(@NotNull AnActionEvent e) {
+						chooseBase();
+					}
+
+					@Override
+					public @NotNull ActionUpdateThread getActionUpdateThread() {
+						return ActionUpdateThread.BGT;
 					}
 				});
 			}

@@ -63,7 +63,7 @@ public class BranchChangeSourceTest extends BasePlatformTestCase {
 		write("Shared.txt", "b\n");
 
 		VirtualFile rootFile = map();
-		BranchChangeSource source = new BranchChangeSource(getProject());
+		BranchChangeSource source = new BranchChangeSource(getProject(), null);
 		// repository lookup and git run off the EDT, as in the panel's refresh; waiting keeps dispatching EDT events
 		Collection<Change> changes = PlatformTestUtil.waitForFuture(ApplicationManager.getApplication().executeOnPooledThread(() -> {
 			GitRepository repository = GitRepositoryManager.getInstance(getProject()).getRepositoryForRoot(rootFile);
@@ -84,6 +84,46 @@ public class BranchChangeSourceTest extends BasePlatformTestCase {
 		assertEquals(List.of("1\n", "3\n"), contents);
 		assertEquals(Change.Type.MODIFICATION, byName.get("Shared.txt").getType());
 		assertEquals("vs main", source.title());
+	}
+
+	public void testChosenLocalBaseWithASlashIsUsed() throws Exception {
+		forkReleaseAndFeature();
+		BranchChangeSource source = new BranchChangeSource(getProject(), "release/1.0");
+		assertEquals(List.of("Feature.txt"), changedNames(source));
+		assertEquals("vs release/1.0", source.title());
+	}
+
+	public void testMissingChosenBaseFallsBackToDefaultAndSaysSo() throws Exception {
+		forkReleaseAndFeature();
+		BranchChangeSource source = new BranchChangeSource(getProject(), "gone");
+		assertEquals(List.of("Feature.txt", "Release.txt"), changedNames(source));
+		assertEquals("vs main (gone not found)", source.title());
+	}
+
+	/** main -> release/1.0 -> feature, one commit each on the last two; the repository is mapped and current on feature. */
+	private void forkReleaseAndFeature() throws Exception {
+		git("init", "-b", "main");
+		git("config", "core.autocrlf", "false");
+		write("Base.txt", "a\n");
+		commit("base");
+		git("checkout", "-b", "release/1.0");
+		write("Release.txt", "r\n");
+		commit("release");
+		git("checkout", "-b", "feature");
+		write("Feature.txt", "f\n");
+		commit("feature");
+		map();
+	}
+
+	private List<String> changedNames(BranchChangeSource source) {
+		VirtualFile rootFile = LocalFileSystem.getInstance().findFileByNioFile(root);
+		Collection<Change> changes = PlatformTestUtil.waitForFuture(ApplicationManager.getApplication().executeOnPooledThread(() -> {
+			GitRepository repository = GitRepositoryManager.getInstance(getProject()).getRepositoryForRoot(rootFile);
+			assertNotNull("Git repository not registered", repository);
+			repository.update();
+			return source.changes();
+		}), TimeUnit.MINUTES.toMillis(1));
+		return changes.stream().map(c -> ChangesUtil.getFilePath(c).getName()).sorted().toList();
 	}
 
 	/** Maps the root to Git; on the EDT, which refreshing and mapping need. */

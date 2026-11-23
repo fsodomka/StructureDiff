@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
@@ -34,19 +35,27 @@ import java.util.stream.Collectors;
  */
 public final class BranchChangeSource implements ChangeSource {
 	private static final Logger LOG = Logger.getInstance(BranchChangeSource.class);
+	/**
+	 * The default bases as text. A compile-time constant, so the Branch mode's menu can show it without loading this class,
+	 * which needs the optional Git plugin.
+	 */
+	public static final String DEFAULT_BASES = "origin/main, main, origin/master, master";
 	/** Base branches in order of preference; the remote-tracking branch is what a merge request compares to, even with a stale local one. */
-	private static final List<String> BASES = List.of("origin/main", "main", "origin/master", "master");
+	private static final List<String> BASES = List.of(DEFAULT_BASES.split(", "));
 	private final Project project;
 	private final LocalChangeSource local;
 	/** Merge base per repository root, for the HEAD and base hashes it was computed from. */
 	private final Map<VirtualFile, MergeBase> mergeBases = new ConcurrentHashMap<>();
 	private final Set<VirtualFile> warnedNoBase = ConcurrentHashMap.newKeySet();
+	/** Base chosen by the user, e.g. {@code origin/develop}; null for the default {@link #BASES}. */
+	private final String chosenBase;
 
 	private record MergeBase(String key, String revision) {
 	}
 
-	public BranchChangeSource(Project project) {
+	public BranchChangeSource(Project project, String chosenBase) {
 		this.project = project;
+		this.chosenBase = chosenBase;
 		local = new LocalChangeSource(project);
 	}
 
@@ -128,10 +137,17 @@ public final class BranchChangeSource implements ChangeSource {
 		}
 	}
 
-	private static GitBranch baseBranch(GitRepository repository) {
+	/** The chosen base, or the first of {@link #BASES} when it is not set or this repository lacks it. */
+	private GitBranch baseBranch(GitRepository repository) {
 		GitBranchesCollection branches = repository.getBranches();
+		if (chosenBase != null) {
+			GitBranch branch = findBranch(branches, chosenBase);
+			if (branch != null) {
+				return branch;
+			}
+		}
 		for (String name : BASES) {
-			GitBranch branch = name.contains("/") ? branches.findRemoteBranch(name) : branches.findLocalBranch(name);
+			GitBranch branch = findBranch(branches, name);
 			if (branch != null) {
 				return branch;
 			}
@@ -139,12 +155,44 @@ public final class BranchChangeSource implements ChangeSource {
 		return null;
 	}
 
-	/** {@code vs origin/main}, or null when no repository has a base branch; reads in-memory repository state only. */
+	/** A name with a slash is a remote branch unless it is a local one such as {@code feature/x}. */
+	private static GitBranch findBranch(GitBranchesCollection branches, String name) {
+		if (!name.contains("/")) {
+			return branches.findLocalBranch(name);
+		}
+		GitBranch remote = branches.findRemoteBranch(name);
+		return remote != null ? remote : branches.findLocalBranch(name);
+	}
+
+	/** Branch names of all repositories, sorted, for choosing a base. */
+	public record BranchNames(List<String> local, List<String> remote) {
+	}
+
+	/** Local and remote branch names of all repositories; reads in-memory repository state only. */
+	public static BranchNames branchNames(Project project) {
+		Set<String> local = new TreeSet<>();
+		Set<String> remote = new TreeSet<>();
+		for (GitRepository repository : GitRepositoryManager.getInstance(project).getRepositories()) {
+			repository.getBranches().getLocalBranches().forEach(b -> local.add(b.getName()));
+			repository.getBranches().getRemoteBranches().forEach(b -> remote.add(b.getName()));
+		}
+		return new BranchNames(new ArrayList<>(local), new ArrayList<>(remote));
+	}
+
+	/**
+	 * {@code vs origin/main}, or null when no repository has a base branch; notes a chosen base that a repository lacks.
+	 * Reads in-memory repository state only.
+	 */
 	public String title() {
-		String bases = GitRepositoryManager.getInstance(project).getRepositories().stream()
-				.map(BranchChangeSource::baseBranch).filter(Objects::nonNull).map(GitBranch::getName)
+		List<GitRepository> repositories = List.copyOf(GitRepositoryManager.getInstance(project).getRepositories());
+		String bases = repositories.stream()
+				.map(this::baseBranch).filter(Objects::nonNull).map(GitBranch::getName)
 				.distinct().collect(Collectors.joining(", "));
-		return bases.isEmpty() ? null : "vs " + bases;
+		if (bases.isEmpty()) {
+			return null;
+		}
+		boolean missing = chosenBase != null && repositories.stream().anyMatch(r -> findBranch(r.getBranches(), chosenBase) == null);
+		return "vs " + bases + (missing ? " (" + chosenBase + " not found)" : "");
 	}
 
 	@Override
