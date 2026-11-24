@@ -850,13 +850,13 @@ final class TreemapPanel extends JComponent {
 			int width = swatch + pad + metrics.stringWidth(text) + 3 * pad;
 			String more = "+" + (entries.size() - i);
 			if (x + width > getWidth() - metrics.stringWidth(more) - pad && i < entries.size() - 1 || x + width > getWidth()) {
-				g.setColor(UIUtil.getInactiveTextColor());
+				g.setColor(UIUtil.getLabelForeground());
 				g.drawString(more, x, baseline);
 				return;
 			}
 			g.setColor(leafTint(entries.get(i).getValue()));
 			g.fillRect(x, swatchY, swatch, swatch);
-			g.setColor(UIUtil.getInactiveTextColor());
+			g.setColor(UIUtil.getLabelForeground());
 			g.drawString(text, x + swatch + pad, baseline);
 			x += width;
 		}
@@ -978,7 +978,7 @@ final class TreemapPanel extends JComponent {
 				+ (note == null ? 0 : metrics.stringWidth(note) + 3 * pad);
 		int x = Math.max(pad, (getWidth() - total) / 2);
 		int baseline = y + pad + metrics.getAscent();
-		g.setColor(UIUtil.getInactiveTextColor());
+		g.setColor(UIUtil.getLabelForeground());
 		g.drawString(left, x, baseline);
 		x += metrics.stringWidth(left) + 2 * pad;
 		int barY = y + pad + (metrics.getHeight() - JBUI.scale(8)) / 2;
@@ -988,7 +988,7 @@ final class TreemapPanel extends JComponent {
 			g.fillRect(x + i, barY, 1, JBUI.scale(8));
 		}
 		x += barWidth + 2 * pad;
-		g.setColor(UIUtil.getInactiveTextColor());
+		g.setColor(UIUtil.getLabelForeground());
 		g.drawString(right, x, baseline);
 		if (note != null) {
 			g.drawString(note, x + metrics.stringWidth(right) + 3 * pad, baseline);
